@@ -1,5 +1,9 @@
 # OpenCode Langfuse Observability Local
 
+> [!WARNING]
+>
+> This is a vibe-coded personal project.
+
 A local receiver and session dashboard for Langfuse data sent by the OpenCode plugin `langfuse/opencode-observability-plugin`. It saves each session's observation history to disk and makes it explorable in the browser. It is not a full Langfuse server.
 
 Requires Node.js 20 or newer.
