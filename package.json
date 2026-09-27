@@ -1,0 +1,36 @@
+{
+  "name": "opencode-langfuse-observability-local",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "npm run build:ui && tsx watch src/server.ts",
+    "build:ui": "node scripts/build-ui.mjs",
+    "build": "tsc && npm run build:ui",
+    "start": "node dist/server.js",
+    "test": "npm run build && node --test dist/*.test.js",
+    "test:ui": "npm run build && node scripts/test-ui.mjs"
+  },
+  "dependencies": {
+    "@fontsource/geist": "^5.3.0",
+    "@gsap/react": "^2.1.2",
+    "fastify": "^5.6.0",
+    "gsap": "^3.15.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  }
+}
