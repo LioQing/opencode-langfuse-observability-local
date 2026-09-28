@@ -1,5 +1,5 @@
 import Fastify from 'fastify';
-import { appendFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { appendFile, lstat, mkdir, readFile, readdir, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -176,10 +176,56 @@ export function createApp(
   writeLine: (line: string) => void = (line) => process.stdout.write(line),
   dataDirectory = defaultDataDirectory(),
   now: () => Date = () => new Date(),
+  retentionDays = 30,
 ) {
   const app = Fastify();
   const pending = new Map<string, Promise<void>>();
   const sessions = new Map<string, { filename: string; state: Record<string, unknown> }>();
+
+  async function cleanOldSessions(): Promise<void> {
+    let files;
+    try {
+      files = await readdir(dataDirectory, { withFileTypes: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw error;
+    }
+    const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
+    for (const file of files) {
+      const match = /^\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}-(ses_[A-Za-z0-9_-]+)\.jsonl$/.exec(file.name);
+      if (!file.isFile() || !match || pending.has(match[1])) continue;
+      const sessionId = match[1];
+      // Reserve the session while checking and deleting, so an incoming append
+      // cannot race with removal of its file.
+      const task = (async () => {
+        try {
+          const path = join(dataDirectory, file.name);
+          const stat = await lstat(path);
+          if (!stat.isFile() || stat.isSymbolicLink() || stat.mtimeMs > cutoff) return;
+          await unlink(path);
+          if (sessions.get(sessionId)?.filename === file.name) sessions.delete(sessionId);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        }
+      })();
+      pending.set(sessionId, task);
+      try {
+        await task;
+      } finally {
+        if (pending.get(sessionId) === task) pending.delete(sessionId);
+      }
+    }
+  }
+
+  let cleanupTimer: NodeJS.Timeout;
+  app.addHook('onReady', async () => {
+    await cleanOldSessions();
+    cleanupTimer = setInterval(() => {
+      void cleanOldSessions().catch(error => app.log.error(error, 'Session cleanup failed'));
+    }, 24 * 60 * 60 * 1000);
+    cleanupTimer.unref();
+  });
+  app.addHook('onClose', async () => { if (cleanupTimer) clearInterval(cleanupTimer); });
 
   function saveObservation(observation: Observation, observedAt: Date): Promise<void> {
     const { attributes, span, sessionId } = observation;

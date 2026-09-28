@@ -15,26 +15,48 @@ npm install
 npm run dev
 ```
 
+## Start automatically with OpenCode V2
+
+Add the GitHub repository to the `plugins` array in `~/.config/opencode/opencode.jsonc` (or `.json`):
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": [
+    {
+      "package": "github:LioQing/opencode-langfuse-observability-local#master",
+      "options": { "port": 45873, "retentionDays": 30 }
+    }
+  ]
+}
+```
+
+OpenCode installs the Git package from the repository's `master` branch; npm runs its `prepare` script to build the receiver and dashboard before loading the package entrypoint. Node.js 20+, npm and Git must be available to the OpenCode service. Push changes to GitHub before installing or updating the Git plugin; uncommitted local changes are not included. To use a local checkout instead, run `npm install` and `npm run build`, then set `package` to its absolute `plugins/receiver` directory (use forward slashes on Windows). Preserve any existing plugins when adding this entry. Set `options.port` to any available port from 1 to 65535 (or omit it to use `PORT` from the OpenCode service, falling back to `45873`). Set the Langfuse plugin's `baseUrl` to the **same port**. This is an **OpenCode V2** plugin: its `setup` launches the built receiver with Node when OpenCode loads it, and its cleanup stops that child when the plugin unloads. It shares a single receiver across locations in the same OpenCode process. If a receiver is already serving `/dashboard` on the configured address, it leaves that process alone (and does not stop it on unload). An unrelated process on the port causes startup to fail rather than replacing that process. After changing the build, update the Git plugin with `opencode plugin update` and restart the OpenCode service to use the new server code.
+
+`options.retentionDays` is an optional positive integer (default `30`); it overrides `RETENTION_DAYS` for plugin-launched receivers. On startup and once a day, the receiver deletes session JSONL files whose **last modification** was at least that many days ago. It leaves other files alone. Existing receivers already running on the port keep their own retention settings.
+
+The spawned receiver inherits `HOST` and `DATA_DIR` from the OpenCode service; `options.port` overrides an inherited `PORT`. Its default storage is the built-release home directory, not the repository's `./data`. Run `opencode service status` to inspect the service, and open **http://127.0.0.1:45873/dashboard** to check the receiver. You still need the separate Langfuse observability plugin configured to send traces to this address.
+
 Configure the plugin's Langfuse connection with arbitrary keys (this receiver does not authenticate them):
 
 ```json
 {
   "publicKey": "pk-lf-...",
   "secretKey": "sk-lf-...",
-  "baseUrl": "http://127.0.0.1:3000"
+  "baseUrl": "http://127.0.0.1:45873"
 }
 ```
 
 ## Dashboard
 
-Open **http://127.0.0.1:3000/dashboard** to browse all `.jsonl` files in the configured data directory. Select a session to open `/dashboard?session=<filename>.jsonl`.
+Open **http://127.0.0.1:45873/dashboard** to browse all `.jsonl` files in the configured data directory. Select a session to open `/dashboard?session=<filename>.jsonl`.
 
 - Search sessions by filename, prompt or model, and sort by update time, tokens or cost.
 - Explore aggregate usage, cost and cache-hit metrics. Select a chart bar to jump to a generation.
 - The timeline sorts by exact nanosecond start timestamps. Generation deltas are reconstructed in file order before sorting. Agent wrapper spans are excluded to avoid duplicating the conversation; unmatched tool observations remain visible.
 - User and generation observations are collapsed except the latest. Expand a generation for provider/model/variant/mode, input-history message counts, output tool-call count, token breakdown, cache hit, cost, duration, output and tool results matched by call ID. Raw input history loads only when expanded.
 - In this plugin's format, `input` is uncached input and the reported `total` excludes cache reads/writes. The dashboard's full total adds `cache_read` and `cache_write`; each generation also shows the original reported total. Cache hit is `cache_read / (input + cache_read + cache_write)`. Percentages use the full total. Unknown values are shown as a dash; recorded zero costs remain zero.
-- Refresh manually or enable 10-second auto-refresh. Invalid/incomplete JSONL lines produce notices while valid observations remain available. Times are displayed in the browser's local timezone.
+- Refresh manually or enable 10-second auto-refresh; the selection persists in browser local storage across visits. Invalid/incomplete JSONL lines produce notices while valid observations remain available. Times are displayed in the browser's local timezone.
 
 The React UI, GSAP animations and Geist fonts are bundled and served by the same Fastify application, with no runtime CDN dependencies. Reduced-motion preferences are respected. `npm run dev` builds frontend assets before starting the server; after editing frontend files, run `npm run build:ui` and refresh. `npm run build` builds both the server and UI.
 
@@ -47,7 +69,7 @@ The receiver uses plain HTTP and binds to `127.0.0.1` by default. It does not us
 Send a JSON trace request:
 
 ```sh
-curl -X POST http://127.0.0.1:3000/api/public/otel/v1/traces \
+curl -X POST http://127.0.0.1:45873/api/public/otel/v1/traces \
   -H 'Content-Type: application/json' \
   -d '{"resourceSpans":[]}'
 ```
@@ -63,7 +85,8 @@ Configuration (environment variables):
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `HOST` | `127.0.0.1` | Bind address; changing this can expose collected prompts and outputs to the network. |
-| `PORT` | `3000` | HTTP listen port (1–65535). Update the plugin's `baseUrl` if changed. |
+| `PORT` | `45873` | HTTP listen port (1–65535). The OpenCode receiver plugin's `options.port` takes precedence; update the Langfuse plugin's `baseUrl` to match. |
 | `DATA_DIR` | `./data` in dev; `~/.local/share/opencode-langfuse-observability-local/data` in built releases | Storage directory for JSONL files. |
+| `RETENTION_DAYS` | `30` | Positive integer number of days since a session JSONL file was last modified before automatic deletion. The receiver plugin's `options.retentionDays` takes precedence. |
 
 For a production-style run, use `npm run build` followed by `npm start`. Run the tests with `npm test`. This receiver does not check Langfuse keys; keep the default loopback bind unless you provide your own network access controls.

@@ -264,12 +264,19 @@ function App() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [refresh, setRefresh] = useState(0);
-  const [auto, setAuto] = useState(false);
+  const [auto, setAuto] = useState(() => {
+    try { return localStorage.getItem('observatory.autoRefresh') === 'true'; }
+    catch { return false; }
+  });
   const [showFloatingActions, setShowFloatingActions] = useState(false);
   const [updated, setUpdated] = useState<Date | null>(null);
   const scope = useRef<HTMLElement>(null);
   const toolbar = useRef<HTMLDivElement>(null);
   const footer = useRef<HTMLElement>(null);
+  useEffect(() => {
+    try { localStorage.setItem('observatory.autoRefresh', String(auto)); }
+    catch { /* Storage may be unavailable in private browsing. */ }
+  }, [auto]);
   useEffect(() => {
     if (!filename) return;
     const update = () => setShowFloatingActions(

@@ -114,6 +114,8 @@ try {
   await expect(shortcuts.getByRole('link', { name: 'All sessions' })).toHaveAttribute('href', '/dashboard');
   await shortcuts.getByRole('checkbox', { name: 'Auto-refresh' }).check();
   await expect(page.locator('.workspace-toolbar').getByRole('checkbox', { name: 'Auto-refresh' })).toBeChecked();
+  await page.reload();
+  await expect(page.locator('.workspace-toolbar').getByRole('checkbox', { name: 'Auto-refresh' })).toBeChecked();
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
   await expect(page.locator('.floating-actions')).toBeHidden();
@@ -126,6 +128,10 @@ try {
   await expect(page.getByRole('alert')).toContainText('Session not found');
   await page.getByRole('link', { name: 'Back to library' }).click();
   await expect(page.locator('.session-link')).toHaveCount(1);
+  await expect(page.locator('.workspace-toolbar').getByRole('checkbox', { name: 'Auto-refresh' })).toBeChecked();
+  await page.locator('.workspace-toolbar').getByRole('checkbox', { name: 'Auto-refresh' }).uncheck();
+  await page.reload();
+  await expect(page.locator('.workspace-toolbar').getByRole('checkbox', { name: 'Auto-refresh' })).not.toBeChecked();
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   assert.deepEqual(errors, []);
   console.log('Browser checks passed: library search, navigation, newest-first timeline, expansion, tool matching, lazy history, chart navigation, filtering, refresh, Markdown safety, mobile layout, and error recovery.');

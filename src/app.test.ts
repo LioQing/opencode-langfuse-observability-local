@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -13,6 +13,42 @@ test('uses the working directory in development and the home data directory in b
     join(currentDirectory, 'data'));
   assert.equal(defaultDataDirectory(pathToFileURL(join(currentDirectory, 'dist', 'app.js')).href, currentDirectory, homeDirectory),
     join(homeDirectory, '.local', 'share', 'opencode-langfuse-observability-local', 'data'));
+});
+
+test('cleans only session JSONL files older than the configured last-modified retention', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'traces-retention-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const now = new Date();
+  const old = '2026-08-01-00-00-00-ses_old.jsonl';
+  const active = '2026-08-01-00-00-00-ses_active.jsonl';
+  const recent = '2026-09-27-00-00-00-ses_recent.jsonl';
+  const unrelated = 'notes.jsonl';
+  for (const name of [old, active, recent, unrelated]) {
+    await writeFile(join(directory, name), '{}\n');
+  }
+  const fortyDaysAgo = new Date(now.getTime() - 40 * 86400000);
+  for (const name of [old, unrelated]) await utimes(join(directory, name), fortyDaysAgo, fortyDaysAgo);
+  await utimes(join(directory, active), new Date(now.getTime() - 2 * 86400000), new Date(now.getTime() - 2 * 86400000));
+
+  const app = createApp(() => {}, directory, () => now, 30);
+  t.after(() => app.close());
+  await app.ready();
+  assert.deepEqual((await readdir(directory)).sort(), [active, recent, unrelated].sort());
+});
+
+test('retention override preserves files newer than its threshold', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'traces-retention-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const now = new Date();
+  const old = '2026-09-20-00-00-00-ses_old.jsonl';
+  const recent = '2026-09-26-00-00-00-ses_recent.jsonl';
+  for (const name of [old, recent]) await writeFile(join(directory, name), '{}\n');
+  await utimes(join(directory, old), new Date(now.getTime() - 8 * 86400000), new Date(now.getTime() - 8 * 86400000));
+  await utimes(join(directory, recent), new Date(now.getTime() - 2 * 86400000), new Date(now.getTime() - 2 * 86400000));
+  const app = createApp(() => {}, directory, () => now, 7);
+  t.after(() => app.close());
+  await app.ready();
+  assert.deepEqual(await readdir(directory), [recent]);
 });
 
 test('saves generation observations and prints unknown observation types', async (t) => {
