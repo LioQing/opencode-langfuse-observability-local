@@ -1,10 +1,18 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:net';
-import { mkdtemp, readdir, rm, utimes, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import plugin from './receiver/index.js';
+
+test('Git package does not trigger npm dependency preparation', async () => {
+  const { scripts, workspaces } = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.equal(workspaces, undefined);
+  for (const name of ['postinstall', 'build', 'preinstall', 'install', 'prepack', 'prepare']) {
+    assert.equal(scripts[name], undefined, `npm prepares Git dependencies with a ${name} script`);
+  }
+});
 
 async function freePort() {
   const server = createServer();
