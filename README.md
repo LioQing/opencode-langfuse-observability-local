@@ -17,21 +17,38 @@ npm run dev
 
 ## Start automatically with OpenCode V2
 
-Add the GitHub repository to the `plugins` array in `~/.config/opencode/opencode.jsonc` (or `.json`):
+### Install from a local clone (recommended)
+
+Clone the repository and build it with Node.js 20 or newer:
+
+```sh
+git clone https://github.com/LioQing/opencode-langfuse-observability-local.git
+cd opencode-langfuse-observability-local
+npm ci
+npm run bundle
+```
+
+In `~/.config/opencode/opencode.jsonc` (or `.json`), add the receiver to your existing `plugins` array. Set `package` to the **absolute path** of the clone's `plugins/receiver` directory (use forward slashes on Windows):
 
 ```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
   "plugins": [
     {
-      "package": "github:LioQing/opencode-langfuse-observability-local#master",
+      "package": "C:/path/to/opencode-langfuse-observability-local/plugins/receiver",
       "options": { "port": 45873, "retentionDays": 30 }
     }
   ]
 }
 ```
 
-OpenCode installs the Git package from the repository's `master` branch. The receiver and dashboard build outputs are committed with the source. npm prepares Git dependencies with a `build` script even when they have no `prepare` script, so this package uses `npm run bundle` for source builds instead; OpenCode's bundled runtime cannot run npm's nested Git preparation on Windows. Run `npm run bundle` and commit the updated `dist/` files when changing the receiver or dashboard. Node.js 20+, npm and Git must be available to the OpenCode service. Push changes to GitHub before installing or updating the Git plugin; uncommitted local changes are not included. To use a local checkout instead, run `npm install` and `npm run bundle`, then set `package` to its absolute `plugins/receiver` directory (use forward slashes on Windows). Preserve any existing plugins when adding this entry. Set `options.port` to any available port from 1 to 65535 (or omit it to use `PORT` from the OpenCode service, falling back to `45873`). Set the Langfuse plugin's `baseUrl` to the **same port**. This is an **OpenCode V2** plugin: its `setup` launches the built receiver with Node when OpenCode loads it, and its cleanup stops that child when the plugin unloads. It shares a single receiver across locations in the same OpenCode process. If a receiver is already serving `/dashboard` on the configured address, it leaves that process alone (and does not stop it on unload). An unrelated process on the port causes startup to fail rather than replacing that process. After changing the bundle, update the Git plugin with `opencode plugin update` and restart the OpenCode service to use the new server code.
+Keep other configured plugins when adding this entry. After pulling updates, run `npm ci` and `npm run bundle` in the clone, then `opencode service restart` to load the new code. Local paths are not updated by `opencode plugin update`.
+
+### Install directly from GitHub
+
+You can instead set `package` to `"github:LioQing/opencode-langfuse-observability-local#master"`. **OpenCode V2 2.0.18 on Windows may fail to install this Git package with `git dep preparation failed`; use the local-clone steps above if that happens.** Git installations require Git, npm, and Node.js 20+ available to the OpenCode service. Changes need to be pushed before `opencode plugin update` can pick them up.
+
+Set `options.port` to any available port from 1 to 65535 (or omit it to use `PORT` from the OpenCode service, falling back to `45873`). Set the Langfuse plugin's `baseUrl` to the **same port**. This is an **OpenCode V2** plugin: its `setup` launches the built receiver with Node when OpenCode loads it, and its cleanup stops that child when the plugin unloads. It shares a single receiver across locations in the same OpenCode process. If a receiver is already serving `/dashboard` on the configured address, it leaves that process alone (and does not stop it on unload). An unrelated process on the port causes startup to fail rather than replacing that process.
 
 `options.retentionDays` is an optional positive integer (default `30`); it overrides `RETENTION_DAYS` for plugin-launched receivers. On startup and once a day, the receiver deletes session JSONL files whose **last modification** was at least that many days ago. It leaves other files alone. Existing receivers already running on the port keep their own retention settings.
 
