@@ -3,7 +3,7 @@
 > [!WARNING]
 > This is a vibe-coded personal project.
 
-https://github.com/user-attachments/assets/29e77b8f-5839-4779-9075-cd0da966d0dd
+https://github.com/user-attachments/assets/6b5c9ffc-8691-4fed-8773-63fc911fb4e7
 
 A local receiver and dashboard for data sent by the OpenCode plugin `langfuse/opencode-observability-plugin`. It saves observations to per-session JSONL files and lets you explore them in a browser. It is not a full Langfuse server.
 
