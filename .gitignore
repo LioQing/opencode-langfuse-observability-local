@@ -1,3 +1,14 @@
 node_modules/
-dist/
+/dist/*
+!/dist/app.js
+!/dist/config.js
+!/dist/dashboard-data.js
+!/dist/dashboard.js
+!/dist/server.js
+!/dist/public/
+/dist/public/*
+!/dist/public/*.js
+!/dist/public/*.css
+!/dist/public/*.woff
+!/dist/public/*.woff2
 data/
