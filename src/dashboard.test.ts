@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { createApp } from './app.js';
 import { parseSession } from './dashboard-data.js';
+import type { PricingStore } from './model-pricing.js';
 
 const p = 'langfuse.observation.';
 const lines = (...entries: unknown[]) => entries.map(entry => JSON.stringify(entry)).join('\n') + '\n';
@@ -80,11 +81,32 @@ test('calculates session duration from earliest to latest observation, not summe
   ), 'duration.jsonl');
   assert.equal(session.stats.durationMs, 11500);
   assert.equal(session.stats.durationPartial, true);
+  assert.equal(session.stats.generationDurationMs, 1000);
+  assert.equal(session.stats.generationDurationPartial, false);
   assert.equal(parseSession(lines({ [p + 'type']: 'event', startTimeUnixNano: '100' }), 'one.jsonl').stats.durationMs, null);
   assert.equal(parseSession(lines({ [p + 'type']: 'event', startTimeUnixNano: '100' }, { [p + 'type']: 'event', startTimeUnixNano: '100' }), 'same.jsonl').stats.durationMs, 0);
 });
 
-test('infers orphan tool results only inside one complete generation interval without inflating recorded calls', () => {
+test('sums only recorded generation durations and keeps missing durations distinct from zero', () => {
+  const session = parseSession(lines(
+    { [p + 'type']: 'event', startTimeUnixNano: '1000000000' },
+    { [p + 'type']: 'generation', startTimeUnixNano: '2000000000', endTimeUnixNano: '4000000000' },
+    { [p + 'type']: 'generation', startTimeUnixNano: '5000000000' },
+    { [p + 'type']: 'generation', startTimeUnixNano: '6000000000', endTimeUnixNano: '6000000000' },
+    { [p + 'type']: 'tool', startTimeUnixNano: '7000000000', endTimeUnixNano: '10000000000' },
+  ), 'generation-duration.jsonl');
+  assert.equal(session.stats.durationMs, 6000);
+  assert.equal(session.stats.generationDurationMs, 2000);
+  assert.equal(session.stats.generationDurationPartial, true);
+  const missing = parseSession(lines({ [p + 'type']: 'generation', startTimeUnixNano: '100' }), 'missing.jsonl');
+  assert.equal(missing.stats.generationDurationMs, null);
+  assert.equal(missing.stats.generationDurationPartial, true);
+  const empty = parseSession('', 'empty.jsonl');
+  assert.equal(empty.stats.generationDurationMs, null);
+  assert.equal(empty.stats.generationDurationPartial, false);
+});
+
+test('infers orphan tool results only inside one complete generation interval and counts observed calls', () => {
   const session = parseSession(lines(
     { [p + 'type']: 'tool', [p + 'metadata']: { callID: 'orphan', tool: 'grep' }, [p + 'input']: { pattern: 'test' }, [p + 'output']: { output: 'match' }, startTimeUnixNano: '120', endTimeUnixNano: '140' },
     { [p + 'type']: 'generation', [p + 'output']: [{ role: 'assistant', thinking: 'searching' }], startTimeUnixNano: '100', endTimeUnixNano: '150' },
@@ -99,7 +121,7 @@ test('infers orphan tool results only inside one complete generation interval wi
   assert.equal(session.items[1].tools[0].inferred, true);
   assert.deepEqual(session.items[1].tools[0].results[0].input, { pattern: 'test' });
   assert.equal(session.items[0].summary, 'tool(read)');
-  assert.equal(session.stats.toolCalls, 0);
+  assert.equal(session.stats.toolCalls, 2);
   assert.equal(session.items[1].counts.toolCalls, 0);
 });
 
@@ -117,7 +139,21 @@ test('leaves ambiguous, incomplete and out-of-interval tools standalone; exact c
   assert.deepEqual(session.items.filter(item => item.type === 'tool').map(item => item.id).sort(), [4, 5, 6, 8]);
   assert.equal(session.items.find(item => item.id === 1)!.tools[0].inferred, false);
   assert.equal(session.items.find(item => item.id === 1)!.tools[0].results[0].id, 3);
-  assert.equal(session.stats.toolCalls, 1);
+  assert.equal(session.stats.toolCalls, 5);
+});
+
+test('counts tool observations without generation output, without double-counting linked output calls', () => {
+  const session = parseSession(lines(
+    { [p + 'type']: 'generation', [p + 'output']: [{ tool_calls: [{ id: 'linked', name: 'read' }, { id: 'pending', name: 'grep' }] }], startTimeUnixNano: '100', endTimeUnixNano: '200' },
+    { [p + 'type']: 'tool', [p + 'metadata']: { callID: 'linked', tool: 'read' }, startTimeUnixNano: '110', endTimeUnixNano: '120' },
+    { [p + 'type']: 'generation', [p + 'output']: [{ role: 'assistant', content: 'Done' }], startTimeUnixNano: '300', endTimeUnixNano: '400' },
+    { [p + 'type']: 'tool', [p + 'metadata']: { callID: 'outputless', tool: 'shell' }, startTimeUnixNano: '310', endTimeUnixNano: '320' },
+    { [p + 'type']: 'tool', [p + 'metadata']: { callID: 'standalone', tool: 'patch' } },
+  ), 'observed-tools.jsonl');
+  assert.equal(session.stats.toolCalls, 4);
+  assert.equal(session.items.find(item => item.id === 1)!.counts.toolCalls, 2);
+  assert.equal(session.items.find(item => item.id === 3)!.counts.toolCalls, 0);
+  assert.equal(session.items.find(item => item.id === 3)!.tools[0].inferred, true);
 });
 
 test('handles legacy deltas, orphan tools, missing results, malformed lines and unknown timestamps', () => {
@@ -181,6 +217,50 @@ test('session detail and library share the first user request as their title', a
   assert.equal(detail.preview, 'First request');
   assert.equal(detail.filename, 'conversation.jsonl');
   assert.equal((await app.inject('/dashboard/api/session?session=empty.jsonl')).json().preview, 'No user observations recorded');
+});
+
+test('estimates complete session and library costs using the current startup pricing, without replacing recorded cost', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'dashboard-pricing-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await writeFile(join(directory, 'priced.jsonl'), lines(
+    { [p + 'type']: 'generation', [p + 'model.name']: 'model', [p + 'metadata']: { providerID: 'provider' },
+      [p + 'usage_details']: { input: 100, output: 20, reasoning: 10, cache_read: 900, cache_write: 10, total: 130 },
+      [p + 'cost_details']: { total: 0.123 } },
+    { [p + 'type']: 'generation', [p + 'usage_details']: { input: 0, output: 0, reasoning: 0, cache_read: 0, cache_write: 0, total: 0 } },
+  ));
+  const pricing: PricingStore = { catalog: null };
+  const app = createApp(() => {}, directory, undefined, 30, pricing);
+  t.after(() => app.close());
+  const detail = async () => (await app.inject('/dashboard/api/session?session=priced.jsonl')).json();
+  assert.equal((await detail()).stats.estimatedCost, null);
+  assert.equal((await detail()).items[0].estimatedCost, null);
+  assert.equal((await detail()).items[0].modelPrice, null);
+  let finishPricing!: () => void;
+  pricing.ready = new Promise<void>(resolve => { finishPricing = resolve; });
+  const pending = detail();
+  pricing.catalog = { provider: { models: { model: { cost: { input: 1, output: 2, cache_read: 0.1, cache_write: 0.5 } } } } };
+  finishPricing();
+  await pending;
+  const priced = await detail();
+  assert.equal(priced.stats.cost, 0.123);
+  assert.ok(Math.abs(priced.stats.estimatedCost.total - 0.000255) < 1e-12);
+  assert.equal(priced.items[0].cost, 0.123);
+  assert.ok(Math.abs(priced.items[0].estimatedCost.total - 0.000255) < 1e-12);
+  assert.equal(priced.items[1].estimatedCost.total, 0);
+  assert.deepEqual(priced.items[0].modelPrice, { input: 1, output: 2, cache_read: 0.1, cache_write: 0.5 });
+  assert.deepEqual(priced.stats.estimatedCost, (await app.inject('/dashboard/api/sessions')).json().sessions[0].stats.estimatedCost);
+  await writeFile(join(directory, 'unknown.jsonl'), lines({ [p + 'type']: 'generation', [p + 'model.name']: 'other',
+    [p + 'metadata']: { providerID: 'provider' }, [p + 'usage_details']: { input: 1, output: 1, reasoning: 0, cache_read: 0, cache_write: 0 } }));
+  assert.equal((await app.inject('/dashboard/api/sessions')).json().sessions.find((session: any) => session.filename === 'unknown.jsonl').stats.estimatedCost, null);
+  const incomplete = parseSession(lines(
+    { [p + 'type']: 'generation', [p + 'model.name']: 'model', [p + 'metadata']: { providerID: 'provider' },
+      [p + 'usage_details']: { input: 1, output: 1, reasoning: 0, cache_read: 0, cache_write: 0 } },
+    { [p + 'type']: 'generation', [p + 'usage_details']: { input: 1, output: 1, cache_read: 0, cache_write: 0 } },
+  ), 'incomplete.jsonl', pricing.catalog);
+  assert.equal(incomplete.stats.estimatedCost, null);
+  assert.notEqual(incomplete.items[0].estimatedCost, null);
+  assert.equal(incomplete.items[1].estimatedCost, null);
+  assert.deepEqual(incomplete.items[1].modelPrice, { input: 1, output: 2, cache_read: 0.1, cache_write: 0.5 });
 });
 
 test('a new workspace with no data directory has an empty library', async t => {

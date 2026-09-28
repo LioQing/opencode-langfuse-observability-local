@@ -10,6 +10,7 @@ import '@fontsource/geist/latin-500.css';
 import '@fontsource/geist/latin-600.css';
 import './dashboard.css';
 import type { Session, Item } from '../dashboard-data.js';
+import type { CostEstimate } from '../model-pricing.js';
 
 gsap.registerPlugin(ScrollTrigger, useGSAP);
 type SessionView = Omit<Session, 'items'> & { items: Omit<Item, 'input'>[] };
@@ -29,6 +30,8 @@ const duration = (ms: number | null) => {
   const remaining = seconds % 60;
   return [days && `${days}d`, (days || hours) && `${hours}h`, (days || hours || minutes) && `${minutes}m`, `${remaining}s`].filter(Boolean).join(' ');
 };
+const tokenSpeed = (tokens: number | null, ms: number | null) => tokens === null || ms === null || ms <= 0 ? null : tokens * 1000 / ms;
+const speedText = (rate: number | null) => rate === null ? '—' : new Intl.NumberFormat(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(rate);
 const date = (value: string | null) => value ? new Date(value).toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'Time unavailable';
 const pretty = (value: unknown) => typeof value === 'string' ? value : JSON.stringify(value, null, 2) ?? 'Not recorded';
 const usageLabels = { input: 'Input', output: 'Output', reasoning: 'Reasoning', reportedTotal: 'Subtotal excl. cache', cache_read: 'Cached input', cache_write: 'Cached output', total: 'Total incl. cache' };
@@ -60,42 +63,81 @@ function Icon({ name, size = 18 }: { name: string; size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name] ?? paths.spark}</svg>;
 }
 
+function GenerationIcons({ item, compact = false }: { item: Observation; compact?: boolean }) {
+  const size = compact ? 12 : 18;
+  return <span className={`type-icons${compact ? ' chart-column-icons' : ''}`} aria-hidden="true">
+    {item.reasoning && <span className="type-icon generation"><Icon name="spark" size={size} /></span>}
+    {item.response && <span className="type-icon response"><Icon name="response" size={size} /></span>}
+    {item.tools.length > 0 && <span className="type-icon tool"><Icon name="tool" size={size} /></span>}
+    {!item.reasoning && !item.response && item.tools.length === 0 && <span className="type-icon generation"><Icon name="file" size={size} /></span>}
+  </span>;
+}
+
 function Signal() {
   return <span className="signal" aria-hidden="true">{Array.from({ length: 15 }, (_, i) => <i key={i} style={{ height: `${20 + Math.sin(i * 1.9) ** 2 * 70}%` }} />)}</span>;
 }
 
 function Metrics({ stats, library }: { stats: Session['stats']; library?: number }) {
+  const generatedTokens = [stats.usage.output, stats.usage.reasoning, stats.usage.cache_write];
+  const speedTokens = generatedTokens.every(value => value === null) ? null : generatedTokens.reduce<number>((total, value) => total + (value ?? 0), 0);
+  const effectiveSpeed = tokenSpeed(speedTokens, stats.durationMs);
+  const actualSpeed = tokenSpeed(speedTokens, stats.generationDurationMs);
+  const estimated = stats.estimatedCost && money(stats.estimatedCost.total) !== money(stats.cost) ? stats.estimatedCost : null;
   return <div className={`metrics${library == null ? ' session-metrics' : ''}`}>
     <div className={`metric${library == null ? ' generations-metric' : ''}`}><span>{library == null ? 'Generations' : 'Sessions recorded'}</span><strong>{format(library ?? stats.generations)}{library != null && <small>{format(stats.generations)} generations</small>}</strong><div className="metric-bottom">{library == null ? `${format(stats.users)} user ${stats.users === 1 ? 'request' : 'requests'}, ${format(stats.toolCalls)} tool ${stats.toolCalls === 1 ? 'call' : 'calls'}` : <><span className="dot" />{format(stats.toolCalls)} tool calls</>}</div></div>
     <div className="metric"><span>Total tokens</span><strong>{compact(stats.usage.total)}</strong><div className="metric-bottom">{format(stats.usage.total)} recorded{stats.missingUsage > 0 ? ' · partial' : ''}</div></div>
     <div className="metric"><span>Input cache hit</span><strong>{percent(stats.cacheHit)}</strong><div className="meter"><i style={{ width: `${Math.min(100, (stats.cacheHit ?? 0) * 100)}%` }} /></div><div className="metric-bottom">{compact(stats.usage.cache_read)} cached input tokens</div></div>
-    <div className="metric"><span>Recorded cost <small>USD</small></span><strong>{money(stats.cost)}</strong><div className="metric-bottom">{stats.missingCost ? `${stats.missingCost} generations without cost` : 'Across all generations'}</div></div>
-    {library == null && <div className="metric"><span>Total duration</span><strong>{duration(stats.durationMs)}</strong><div className="metric-bottom">First to last observation{stats.durationPartial && stats.durationMs !== null ? ' · partial timestamps' : ''}</div></div>}
+    <div className="metric"><span>Recorded cost <small>USD</small></span><strong>{money(stats.cost)}</strong><div className="metric-bottom">{estimated ? <div className="cost-estimate"><span>Estimated {money(estimated.total)}</span><span>{money(estimated.input)} in</span><span>{money(estimated.output)} out</span><span>{money(estimated.cache_read)} cached in</span><span>{money(estimated.cache_write)} cached out</span></div> : stats.missingCost ? `${stats.missingCost} generations without cost` : 'Across all generations'}</div></div>
+    {library == null && <><div className="metric"><span>Total duration</span><strong>{duration(stats.durationMs)}</strong><div className="metric-bottom">Generation time {duration(stats.generationDurationMs)} · {percent(stats.durationMs && stats.generationDurationMs !== null ? stats.generationDurationMs / stats.durationMs : null)}{stats.generationDurationPartial ? ' · partial generation time' : ''}{stats.durationPartial && stats.durationMs !== null ? ' · partial timestamps' : ''}</div></div>
+      <div className="metric speed-metric"><span>Effective token speed</span><strong>{speedText(effectiveSpeed)}{effectiveSpeed === null ? '' : ' t/s'}</strong><div className="metric-bottom">Actual · {speedText(actualSpeed)}{actualSpeed === null ? '' : ' tokens/s'}{stats.generationDurationPartial ? ' · partial' : ''}<span className="speed-note">Output + reasoning + cached output</span></div></div></>}
   </div>;
 }
 
-function UsageTable({ usage, reportedTotal }: { usage: Usage; reportedTotal: number | null }) {
-  const [activeCategory, setActiveCategory] = useState<typeof usageCategories[number] | null>(null);
+function UsageTable({ usage, reportedTotal, estimatedCost }: { usage: Usage; reportedTotal: number | null; estimatedCost?: CostEstimate | null }) {
+  const [active, setActive] = useState<{ category: typeof usageCategories[number]; measure: 'tokens' | 'cost' } | null>(null);
+  const activeCategory = active?.category ?? null;
   const activeValue = activeCategory === null ? null : usage[activeCategory];
   const activeRatio = activeValue == null || usage.total == null ? null : usage.total ? activeValue / usage.total : 0;
-  return <div className="usage-table"><div className="usage-row table-head"><span>Token category</span><span>Tokens</span><span>% of total</span></div>
+  const categoryCost = (key: typeof usageCategories[number]) => !estimatedCost ? null : key === 'output' ? estimatedCost.output - estimatedCost.reasoning : estimatedCost[key];
+  const activeCost = activeCategory === null ? null : categoryCost(activeCategory);
+  const activeCostRatio = activeCost === null || !estimatedCost ? null : estimatedCost.total ? activeCost / estimatedCost.total : 0;
+  return <div className={`usage-table${estimatedCost !== undefined ? ' with-cost' : ''}`}><div className="usage-rows"><div className="usage-row table-head"><span>Token category</span><span>Tokens</span><span className="usage-percent">% of total</span>{estimatedCost !== undefined && <><span>Estimated $</span><span className="usage-percent">% of total $</span></>}</div>
     {Object.entries(usageLabels).map(([key, label]) => {
       const value = key === 'reportedTotal' ? reportedTotal : usage[key as keyof Usage];
       const ratio = value == null || usage.total == null ? null : usage.total ? value / usage.total : 0;
-      return <div className={`usage-row${key === 'reportedTotal' ? ' subtotal-row' : key === 'total' ? ' total-row' : ''}`} key={key}><span>{key !== 'reportedTotal' && key !== 'total' && <i style={{ background: usageColors[key as keyof Usage] }} />}{label}</span><span>{format(value)}</span><span>{percent(ratio)}</span></div>;
-    })}
+      const cost = !estimatedCost ? null : key === 'total' ? estimatedCost.total : key === 'reportedTotal' ? estimatedCost.input + estimatedCost.output : categoryCost(key as typeof usageCategories[number]);
+      const costRatio = cost === null || !estimatedCost ? null : estimatedCost.total ? cost / estimatedCost.total : 0;
+      return <div className={`usage-row${key === 'reportedTotal' ? ' subtotal-row' : key === 'total' ? ' total-row' : ''}`} key={key}><span>{key !== 'reportedTotal' && key !== 'total' && <i style={{ background: usageColors[key as keyof Usage] }} />}{label}</span><span>{format(value)}</span><span className="usage-percent">{percent(ratio)}</span>{estimatedCost !== undefined && <><span>{money(cost)}</span><span className="usage-percent">{percent(costRatio)}</span></>}</div>;
+    })}</div>
     <div className="usage-bar-wrap">
+      {estimatedCost !== undefined && <span className="usage-bar-label">Tokens</span>}
       <div className="usage-bar" role="group" aria-label="Token composition by category">
         {usage.total != null && usage.total > 0 && usageCategories.map(key => {
           const value = usage[key];
           if (value == null || value <= 0) return null;
           const ratio = value / usage.total!;
-          return <button type="button" className="usage-segment" key={key} style={{ width: `${ratio * 100}%`, background: usageColors[key] }} aria-label={`${usageLabels[key]}: ${format(value)} tokens, ${percent(ratio)} of total`} onMouseEnter={() => setActiveCategory(key)} onMouseLeave={() => setActiveCategory(null)} onFocus={() => setActiveCategory(key)} onBlur={() => setActiveCategory(null)} />;
+          return <button type="button" className="usage-segment" key={key} style={{ width: `${ratio * 100}%`, background: usageColors[key] }} aria-label={`${usageLabels[key]}: ${format(value)} tokens, ${percent(ratio)} of total`} onMouseEnter={() => setActive({ category: key, measure: 'tokens' })} onMouseLeave={() => setActive(null)} onFocus={() => setActive({ category: key, measure: 'tokens' })} onBlur={() => setActive(null)} />;
         })}
       </div>
-      {activeCategory && <div className="usage-tooltip" role="tooltip"><strong>{usageLabels[activeCategory]}</strong><span>{format(activeValue)} tokens · {percent(activeRatio)} of total</span></div>}
+      {estimatedCost !== undefined && <><span className="usage-bar-label cost-bar-label">Estimated cost</span><div className="usage-bar" role="group" aria-label="Estimated cost composition by category">
+        {estimatedCost && estimatedCost.total > 0 && usageCategories.map(key => {
+          const cost = categoryCost(key)!;
+          if (cost <= 0) return null;
+          const ratio = cost / estimatedCost.total;
+          return <button type="button" className="usage-segment" key={key} style={{ width: `${ratio * 100}%`, background: usageColors[key] }} aria-label={`${usageLabels[key]}: ${money(cost)}, ${percent(ratio)} of estimated cost`} onMouseEnter={() => setActive({ category: key, measure: 'cost' })} onMouseLeave={() => setActive(null)} onFocus={() => setActive({ category: key, measure: 'cost' })} onBlur={() => setActive(null)} />;
+        })}
+      </div>{!estimatedCost && <span className="usage-bar-note">Pricing unavailable</span>}</>}
+      {activeCategory && <div className="usage-tooltip" role="tooltip"><strong>{usageLabels[activeCategory]}</strong><span>{active?.measure === 'cost' ? `${money(activeCost)} · ${percent(activeCostRatio)} of estimated cost` : `${format(activeValue)} tokens · ${percent(activeRatio)} of total`}</span></div>}
     </div>
   </div>;
+}
+
+function ModelPrice({ price }: { price: Observation['modelPrice'] }) {
+  return <section className="model-price" aria-label="Model price"><h3>Model price <small>USD / 1M tokens</small></h3>
+    <div className="model-price-grid">{([['input', 'Input'], ['output', 'Output'], ['cache_read', 'Cached input'], ['cache_write', 'Cached output']] as const).map(([key, label]) =>
+      <div key={key}><span>{label}</span><strong>{money(price?.[key] ?? null)}</strong></div>)}</div>
+    <p className="note">Prices from <a href="https://models.dev/" target="_blank" rel="noreferrer">models.dev</a>. A dash means pricing is unavailable.</p>
+  </section>;
 }
 
 function Analytics({ session, onSelect }: { session: SessionView; onSelect: (id: number) => void }) {
@@ -108,10 +150,10 @@ function Analytics({ session, onSelect }: { session: SessionView; onSelect: (id:
       <div className="analysis-panel volume-panel"><div className="panel-heading"><span className="panel-title">Generation footprint</span><select aria-label="Chart measure" value={measure} onChange={event => setMeasure(event.target.value as typeof measure)}><option value="total">Total tokens</option><option value="uncached">Uncached input</option><option value="cost">Cost (USD)</option></select></div>
         <div className="chart-label"><span>{measure === 'cost' ? money(max === 1 && generations.every(item => !item.cost) ? 0 : max) : format(max)}</span><span>{generations.length} generations</span></div>
         <div className="bar-chart" role="group" aria-label={`${measure} by generation, chronological order`}>
-          {generations.length ? generations.map((item, index) => <button key={item.id} className="chart-column" onClick={() => onSelect(item.id)} title={`Generation ${index + 1} · ${date(item.date)} · ${measure === 'cost' ? money(item.cost) : format(value(item))}`} aria-label={`Inspect generation ${index + 1}: ${measure === 'cost' ? money(item.cost) : format(value(item))} ${measure}`}><span className={value(item) === null ? 'unknown-bar' : ''} style={{ height: `${Math.max(2, (value(item) ?? 0) / max * 100)}%` }} /></button>) : <p className="subtle">No generations recorded yet.</p>}
+          {generations.length ? generations.map((item, index) => <button key={item.id} className="chart-column" onClick={() => onSelect(item.id)} title={`Generation ${index + 1} · ${date(item.date)} · ${measure === 'cost' ? money(item.cost) : format(value(item))}`} aria-label={`Inspect generation ${index + 1}: ${measure === 'cost' ? money(item.cost) : format(value(item))} ${measure}`}><span className="chart-column-bar"><span className={value(item) === null ? 'unknown-bar' : ''} style={{ height: `${Math.max(2, (value(item) ?? 0) / max * 100)}%` }} /></span><GenerationIcons item={item} compact /></button>) : <p className="subtle">No generations recorded yet.</p>}
         </div><div className="chart-label"><span>First generation</span><span>Latest generation</span></div>
       </div>
-       <div className="analysis-panel mix-panel"><div className="panel-heading"><span className="panel-title">Token composition</span></div><UsageTable usage={session.stats.usage} reportedTotal={session.stats.reportedTotal} /></div>
+        <div className="analysis-panel mix-panel"><div className="panel-heading"><span className="panel-title">Token &amp; cost composition</span></div><UsageTable usage={session.stats.usage} reportedTotal={session.stats.reportedTotal} estimatedCost={session.stats.estimatedCost} /></div>
     </div>
   </section>;
 }
@@ -171,19 +213,14 @@ function ObservationCard({ item, filename, open, onToggle }: { item: Observation
   const generation = item.type === 'generation';
   return <article id={`observation-${item.id}`} className={`observation ${open ? 'is-open' : ''} ${item.type}`}>
     <button className="observation-summary" aria-expanded={open} aria-controls={`body-${item.id}`} onClick={onToggle}>
-       <span className="type-icons" aria-hidden="true">{generation ? <>
-         {item.reasoning && <span className="type-icon generation"><Icon name="spark" /></span>}
-         {item.response && <span className="type-icon response"><Icon name="response" /></span>}
-         {item.tools.length > 0 && <span className="type-icon tool"><Icon name="tool" /></span>}
-         {!item.reasoning && !item.response && item.tools.length === 0 && <span className="type-icon generation"><Icon name="file" /></span>}
-       </> : <span className={`type-icon ${item.type}`}><Icon name={item.type === 'user' ? 'user' : 'tool'} /></span>}</span>
+       {generation ? <GenerationIcons item={item} /> : <span className="type-icons" aria-hidden="true"><span className={`type-icon ${item.type}`}><Icon name={item.type === 'user' ? 'user' : 'tool'} /></span></span>}
       <span className="observation-title"><span className="row-label">{generation ? item.model ?? 'Generation' : item.type === 'user' ? 'You' : 'Tool result'}{generation && item.mode && <span>{item.mode}</span>}</span><span className="summary-text">{item.summary}</span></span>
        {generation && <span className="row-usage"><span>{compact(item.uncached)}<small>Input</small></span><span>{compact(item.usage.output)}<small>Output</small></span></span>}
       <time dateTime={item.date ?? undefined} title={item.timestamp ? `${item.timestamp} ns` : undefined}>{date(item.date)}</time><span className="expand-icon"><Icon name="chevron" size={15} /></span>
     </button>
     {open && <div className="observation-body" id={`body-${item.id}`}>
       {generation && <><div className="identity-grid">{[['Provider', item.provider], ['Model', item.model], ['Variant', item.variant], ['Mode', item.mode]].map(([label, value]) => <div key={label}><span>{label}</span><strong>{value ?? 'Not recorded'}</strong></div>)}</div>
-           <div className="generation-grid"><div><h3>Context & execution</h3><h4 className="count-heading">Input history</h4><div className="count-grid">{([['Messages', item.counts.total], ['Assistant', item.counts.assistant], ['User', item.counts.user], ['Tool', item.counts.tool]] as [string, number][]).map(([label, value]) => <div key={label}><strong>{format(value)}</strong><span>{label}</span></div>)}</div><p className="note">Other roles may also appear in the input total.</p><h4 className="count-heading">Generation output</h4><div className="count-grid">{([['Tool calls', item.output == null ? null : item.counts.toolCalls], ['Tool results', item.tools.reduce((total, tool) => total + tool.results.length, 0)], ['Responses', item.outputCounts.responses], ['Reasoning', item.outputCounts.reasoning]] as [string, number | null][]).map(([label, value]) => <div key={label}><strong>{format(value)}</strong><span>{label}</span></div>)}</div><p className="note">Responses and reasoning count messages with text or thinking, not tokens. Tool results count linked observations. A dash means output was not recorded.</p><div className="execution"><div><span>Cache hit</span><strong>{percent(item.cacheHit)}</strong></div><div><span>Cost · USD</span><strong>{money(item.cost)}</strong></div><div><span>Duration</span><strong>{item.duration == null ? '—' : `${(item.duration / 1000).toFixed(2)}s`}</strong></div></div><p className="note">Cache hit = cache read ÷ (input + cache read + cache write). Input is already uncached. A dash means not recorded.</p>{item.costDetails && <details className="nested"><summary>Cost breakdown</summary><pre>{pretty(item.costDetails)}</pre></details>}</div><div><h3>Token usage</h3><UsageTable usage={item.usage} reportedTotal={item.reportedTotal} /></div></div>
+            <div className="generation-grid"><div><h3>Context & execution</h3><h4 className="count-heading">Input history</h4><div className="count-grid">{([['Messages', item.counts.total], ['Assistant', item.counts.assistant], ['User', item.counts.user], ['Tool', item.counts.tool]] as [string, number][]).map(([label, value]) => <div key={label}><strong>{format(value)}</strong><span>{label}</span></div>)}</div><p className="note">Other roles may also appear in the input total.</p><h4 className="count-heading">Generation output</h4><div className="count-grid">{([['Tool calls', item.output == null ? null : item.counts.toolCalls], ['Tool results', item.tools.reduce((total, tool) => total + tool.results.length, 0)], ['Responses', item.outputCounts.responses], ['Reasoning', item.outputCounts.reasoning]] as [string, number | null][]).map(([label, value]) => <div key={label}><strong>{format(value)}</strong><span>{label}</span></div>)}</div><p className="note">Responses and reasoning count messages with text or thinking, not tokens. Tool results count linked observations. A dash means output was not recorded.</p><div className="execution"><div><span>Cache hit</span><strong>{percent(item.cacheHit)}</strong></div><div><span>Recorded cost</span><strong>{money(item.cost)}</strong></div><div><span>Estimated cost</span><strong>{money(item.estimatedCost?.total ?? null)}</strong></div><div><span>Duration</span><strong>{item.duration == null ? '—' : `${(item.duration / 1000).toFixed(2)}s`}</strong></div></div><p className="note">Cache hit = cache read ÷ (input + cache read + cache write). Input is already uncached. A dash means not recorded or pricing unavailable.</p></div><div><ModelPrice price={item.modelPrice} /><h3>Token usage & cost</h3><UsageTable usage={item.usage} reportedTotal={item.reportedTotal} estimatedCost={item.estimatedCost} /></div></div>
       </>}
       <div className="output"><h3>{item.type === 'user' ? 'User message' : generation ? 'Generation output' : 'Tool output'}</h3><Content value={item.output} /></div>
        {item.tools.length > 0 && <div className="tool-results"><h3>Tool results <span className="count-badge">{item.tools.length}</span></h3>{item.tools.map((tool: any, index: number) => <div className="tool-result" key={`${tool.id}-${index}`}><div className="tool-heading"><span><Icon name="tool" /><strong>{tool.name ?? 'Tool'}</strong></span><code>{tool.id ?? 'No call ID'}</code><span className={tool.results.length ? 'status' : 'subtle'}>{tool.inferred ? 'Inferred from timing' : tool.results.length ? 'Recorded' : 'Awaiting result'}</span></div>{tool.results.length ? tool.results.map((result: any) => <div key={result.id}><details className="nested"><summary>Tool input</summary><pre>{pretty(result.input)}</pre></details><Content value={result.output} /></div>) : <p className="note">No matching tool observation in this file yet.</p>}</div>)}</div>}
@@ -238,9 +275,14 @@ function Library({ sessions }: { sessions: LibraryEntry[] }) {
   const stats = useMemo(() => {
     const sum = (values: (number | null)[]) => values.some(value => value != null) ? values.reduce<number>((sum, value) => sum + (value ?? 0), 0) : null;
     const usage = Object.fromEntries(Object.keys(usageLabels).map(key => [key, sum(sessions.map(session => session.stats.usage[key as keyof Usage]))])) as Usage;
+    const estimates = sessions.filter(session => session.stats.generations > 0).map(session => session.stats.estimatedCost);
+    const estimatedCost = estimates.length && estimates.every(value => value !== null) ? estimates.reduce<NonNullable<Session['stats']['estimatedCost']>>((total, value) => ({
+      input: total.input + value!.input, output: total.output + value!.output, reasoning: total.reasoning + value!.reasoning, cache_read: total.cache_read + value!.cache_read,
+      cache_write: total.cache_write + value!.cache_write, total: total.total + value!.total,
+    }), { input: 0, output: 0, reasoning: 0, cache_read: 0, cache_write: 0, total: 0 }) : null;
     return { generations: sessions.reduce((sum, s) => sum + s.stats.generations, 0), users: sessions.reduce((sum, s) => sum + s.stats.users, 0), toolCalls: sessions.reduce((sum, s) => sum + s.stats.toolCalls, 0), usage,
-      cost: sum(sessions.map(s => s.stats.cost)), reportedTotal: sum(sessions.map(s => s.stats.reportedTotal)), cacheHit: usage.input == null || usage.cache_read == null ? null : (usage.input + usage.cache_read + (usage.cache_write ?? 0)) ? usage.cache_read / (usage.input + usage.cache_read + (usage.cache_write ?? 0)) : 0,
-      missingUsage: sessions.reduce((sum, s) => sum + s.stats.missingUsage, 0), missingCost: sessions.reduce((sum, s) => sum + s.stats.missingCost, 0), models: [...new Set(sessions.flatMap(s => s.stats.models))], durationMs: null, durationPartial: false };
+      cost: sum(sessions.map(s => s.stats.cost)), estimatedCost, reportedTotal: sum(sessions.map(s => s.stats.reportedTotal)), cacheHit: usage.input == null || usage.cache_read == null ? null : (usage.input + usage.cache_read + (usage.cache_write ?? 0)) ? usage.cache_read / (usage.input + usage.cache_read + (usage.cache_write ?? 0)) : 0,
+      missingUsage: sessions.reduce((sum, s) => sum + s.stats.missingUsage, 0), missingCost: sessions.reduce((sum, s) => sum + s.stats.missingCost, 0), models: [...new Set(sessions.flatMap(s => s.stats.models))], durationMs: null, durationPartial: false, generationDurationMs: null, generationDurationPartial: false };
   }, [sessions]);
   const filtered = sessions.filter(session => `${session.filename} ${session.preview} ${session.stats.models.join(' ')}`.toLowerCase().includes(query.toLowerCase())).sort((a, b) => sort === 'cost' ? (b.stats.cost ?? -1) - (a.stats.cost ?? -1) : sort === 'tokens' ? (b.stats.usage.total ?? -1) - (a.stats.usage.total ?? -1) : b.modified.localeCompare(a.modified));
   return <>

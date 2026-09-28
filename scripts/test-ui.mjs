@@ -11,12 +11,13 @@ const filename = '2026-09-27-15-59-36-ses_browser.jsonl';
 const records = [
   { [p + 'type']: 'event', [p + 'input']: [{ role: 'user', content: 'Search for a test result' }], startTimeUnixNano: '1790495971615000000' },
   { [p + 'type']: 'tool', [p + 'metadata']: { callID: 'call_browser', tool: 'websearch' }, [p + 'input']: { query: 'test' }, [p + 'output']: { output: 'Matched tool result' }, startTimeUnixNano: '1790496018942000000' },
-  { [p + 'type']: 'generation', [p + 'model.name']: 'test-model', [p + 'metadata']: { providerID: 'test-provider', variant: 'medium', mode: 'build' }, [p + 'input']: { system: ['private system history'], messages: [{ role: 'user', content: 'Search' }] }, [p + 'output']: [{ role: 'assistant', thinking: [{ type: 'thinking', content: 'Looking it up' }], tool_calls: [{ id: 'call_browser', name: 'websearch', arguments: '{"query":"test"}' }] }], [p + 'usage_details']: { input: 100, output: 20, reasoning: 10, cache_read: 900, cache_write: 0, total: 130 }, [p + 'cost_details']: { total: 0 }, startTimeUnixNano: '1790496016931000000' },
-  { [p + 'type']: 'generation', [p + 'input']: { messages: [{ role: 'user' }, { role: 'assistant' }, { role: 'tool' }] }, [p + 'output']: [{ role: 'assistant', content: '**Final answer**\n\n<script>window.untrustedExecuted=true</script>\n\n[Unsafe](javascript:alert(1))' }], [p + 'usage_details']: { input: 50, output: 30, reasoning: 0, cache_read: 950, cache_write: 0, total: 80 }, [p + 'cost_details']: { total: 0 }, startTimeUnixNano: '1790496026931000000' },
+  { [p + 'type']: 'generation', [p + 'model.name']: 'test-model', [p + 'metadata']: { providerID: 'test-provider', variant: 'medium', mode: 'build' }, [p + 'input']: { system: ['private system history'], messages: [{ role: 'user', content: 'Search' }] }, [p + 'output']: [{ role: 'assistant', thinking: [{ type: 'thinking', content: 'Looking it up' }], tool_calls: [{ id: 'call_browser', name: 'websearch', arguments: '{"query":"test"}' }] }], [p + 'usage_details']: { input: 100, output: 20, reasoning: 10, cache_read: 900, cache_write: 10, total: 130 }, [p + 'cost_details']: { total: 0 }, startTimeUnixNano: '1790496016931000000', endTimeUnixNano: '1790496018931000000' },
+  { [p + 'type']: 'generation', [p + 'input']: { messages: [{ role: 'user' }, { role: 'assistant' }, { role: 'tool' }] }, [p + 'output']: [{ role: 'assistant', content: '**Final answer**\n\n<script>window.untrustedExecuted=true</script>\n\n[Unsafe](javascript:alert(1))' }], [p + 'usage_details']: { input: 50, output: 30, reasoning: 0, cache_read: 950, cache_write: 0, total: 80 }, [p + 'cost_details']: { total: 0 }, startTimeUnixNano: '1790496026931000000', endTimeUnixNano: '1790496029931000000' },
 ];
 const serialize = values => values.map(value => JSON.stringify(value)).join('\n') + '\n';
 let browser;
-const app = createApp(() => {}, directory);
+const pricing = { catalog: { 'test-provider': { models: { 'test-model': { cost: { input: 1, output: 2, reasoning: 3, cache_read: 0.1, cache_write: 0.5 } } } } } };
+const app = createApp(() => {}, directory, undefined, 30, pricing);
 try {
   await writeFile(join(directory, filename), serialize(records));
   const address = await app.listen({ host: '127.0.0.1', port: 0 });
@@ -32,12 +33,89 @@ try {
   await expect(page.getByText('No matching sessions')).toBeVisible();
   await page.getByRole('button', { name: 'Clear search' }).click();
   await expect(page.locator('.session-link h3')).toHaveText('Search for a test result');
+  await expect(page.locator('.metrics .cost-estimate')).toContainText('Estimated $0.00047');
   await page.locator('.session-link').click();
   await expect(page.locator('h1')).toHaveText('Search for a test result');
   await expect(page.locator('.session-filename')).toHaveText(filename);
   await expect(page).toHaveTitle('Search for a test result · Observatory');
-  await expect(page.locator('.session-metrics .metric').last()).toContainText('Total duration');
-  await expect(page.locator('.session-metrics .metric').last().locator('strong')).toHaveText('55s');
+  const durationMetric = page.locator('.session-metrics .metric').filter({ hasText: 'Total duration' });
+  await expect(durationMetric.locator('strong')).toHaveText('55s');
+  await expect(durationMetric.locator('.metric-bottom')).toContainText('Generation time 5s · 9.0%');
+  const speedMetric = page.locator('.session-metrics .metric').filter({ hasText: 'Effective token speed' });
+  await expect(speedMetric.locator('strong')).toContainText('1.3');
+  await expect(speedMetric.locator('strong small')).toHaveText('tokens/s');
+  await expect(speedMetric.locator('.metric-bottom')).toContainText('Actual · 14.0 tokens/s');
+  await expect(speedMetric.locator('.metric-bottom')).toContainText('Output + reasoning + cached output');
+  await expect(page.locator('.session-metrics .cost-estimate')).toContainText('Estimated $0.00047');
+  await expect(page.locator('.session-metrics .cost-estimate')).toContainText('$0.00015 in');
+  await expect(page.locator('.session-metrics .cost-estimate')).toContainText('$0.00013 out');
+  await expect(page.locator('.session-metrics .cost-estimate')).toContainText('$0.000185 cached in');
+  await expect(page.locator('.session-metrics .cost-estimate')).toContainText('$0.000005 cached out');
+  const composition = page.locator('.mix-panel .usage-table');
+  await expect(composition.locator('.usage-row.table-head')).toContainText('% of total $');
+  await expect(composition.locator('.usage-row.total-row')).toContainText('$0.00047');
+  await expect(composition.locator('.usage-bar-label')).toHaveText(['Tokens', 'Estimated cost · USD']);
+  await expect(composition.getByRole('group', { name: 'Estimated cost composition by category' }).locator('.usage-segment')).toHaveCount(5);
+  const chart = page.locator('.volume-panel .bar-chart');
+  assert.equal(await chart.evaluate(node => node.getBoundingClientRect().height > 250), true);
+  assert.deepEqual(await chart.locator('.chart-column').evaluateAll(columns => columns.map(column =>
+    [...column.querySelectorAll('.chart-column-icons .type-icon')].map(icon => [...icon.classList].at(-1)))), [['generation', 'tool'], ['response']]);
+  // Exercise a crowded chart without changing the session fixture or its navigation targets.
+  await chart.evaluate(node => {
+    const originals = [...node.querySelectorAll('.chart-column')];
+    for (let i = originals.length; i < 18; i++) {
+      const copy = originals[i % originals.length].cloneNode(true);
+      copy.classList.add('layout-test-column');
+      node.append(copy);
+    }
+  });
+  const assertChartLayout = async () => assert.deepEqual(await chart.evaluate(node => {
+    const plot = node.getBoundingClientRect();
+    return {
+      verticalOverflow: node.scrollHeight > node.clientHeight + 1,
+      paintedIconRow: getComputedStyle(node.querySelector('.chart-column-icons')).backgroundColor !== 'rgba(0, 0, 0, 0)',
+      clippedColumn: [...node.querySelectorAll('.chart-column')].some(column => column.getBoundingClientRect().bottom > plot.bottom + 1),
+      clippedBar: [...node.querySelectorAll('.chart-column-bar > span')].some(bar => {
+        const rect = bar.getBoundingClientRect();
+        const track = bar.parentElement.getBoundingClientRect();
+        return rect.top < track.top - 1 || rect.bottom > track.bottom + 1;
+      }),
+    };
+  }), { verticalOverflow: false, paintedIconRow: false, clippedColumn: false, clippedBar: false });
+  await assertChartLayout();
+  assert.equal(await chart.evaluate(node => node.scrollWidth <= node.clientWidth), true);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await assertChartLayout();
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await chart.locator('.layout-test-column').evaluateAll(columns => columns.forEach(column => column.remove()));
+  const generation = page.locator('#observation-4');
+  await expect(generation.getByText('Recorded cost · USD')).toBeVisible();
+  await expect(generation.locator('.execution').getByText('Estimated cost · USD')).toBeVisible();
+  await expect(generation.locator('.execution')).toContainText('$0.000205');
+  const modelPrice = generation.getByRole('region', { name: 'Model price' });
+  await expect(modelPrice).toContainText('USD / 1M tokens');
+  await expect(modelPrice.locator('.model-price-grid>div')).toHaveText(['Input$1.00', 'Output$2.00', 'Cached input$0.10', 'Cached output$0.50']);
+  assert.equal(await modelPrice.locator('.model-price-grid>div').evaluateAll(nodes => new Set(nodes.map(node => node.getBoundingClientRect().top)).size), 1);
+  await expect(modelPrice.getByRole('link', { name: 'models.dev' })).toHaveAttribute('href', 'https://models.dev/');
+  await expect(generation.getByText('Cost breakdown')).toHaveCount(0);
+  assert.equal(await generation.locator('.model-price').evaluate(node => node.compareDocumentPosition(node.parentElement.querySelector('.usage-table')) & Node.DOCUMENT_POSITION_FOLLOWING ? true : false), true);
+  await expect(generation.getByRole('heading', { name: 'Token usage & cost' })).toBeVisible();
+  await expect(generation.locator('.usage-row.table-head')).toContainText('Estimated $');
+  await expect(generation.locator('.usage-row.table-head')).toContainText('% of total $');
+  await expect(generation.locator('.usage-row').filter({ hasText: 'Output' }).first()).toContainText('$0.00006');
+  await expect(generation.locator('.usage-row').filter({ hasText: 'Cached input' })).toContainText('$0.000095');
+  await expect(generation.locator('.usage-row.total-row')).toContainText('$0.000205');
+  await expect(generation.locator('.usage-bar-label')).toHaveText(['Tokens', 'Estimated cost · USD']);
+  await expect(generation.getByRole('group', { name: 'Estimated cost composition by category' }).locator('.usage-segment')).toHaveCount(3);
+  await generation.getByRole('button', { name: /Cached input: \$0\.000095/ }).hover();
+  await expect(generation.getByRole('tooltip')).toContainText('46.3% of estimated cost');
+  for (const table of [composition, generation.locator('.usage-table')]) {
+    assert.equal(await table.locator('.usage-rows').evaluate(node => node.scrollWidth <= node.clientWidth), true);
+    assert.equal(await table.locator('.usage-bar-wrap').evaluate(node => node.scrollWidth <= node.clientWidth), true);
+    await expect(table.locator('.usage-row.table-head span').last()).toHaveText('% of total $');
+    assert.equal(await table.locator('.usage-row.total-row span').nth(2).evaluate(node => getComputedStyle(node).fontWeight), '400');
+  }
   await expect(page.locator('.observation')).toHaveCount(3);
   assert.deepEqual(await page.locator('.observation').evaluateAll(nodes => nodes.map(node => node.id)), ['observation-4', 'observation-3', 'observation-1']);
   await expect(page.locator('#observation-4 .type-icons .type-icon.response')).toHaveCount(1);
@@ -69,7 +147,9 @@ try {
   await toolText.getByRole('button', { name: 'Raw' }).click();
   await expect(toolText.locator('pre code')).toHaveText('Matched tool result');
   await expect(answer.getByRole('button', { name: 'Markdown' })).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.locator('#observation-3')).toContainText('90.0%');
+  await expect(page.locator('#observation-3')).toContainText('89.1%');
+  await expect(page.locator('#observation-3 .usage-row').filter({ hasText: 'Reasoning' })).toContainText('$0.00003');
+  await expect(page.locator('#observation-3 .usage-row').filter({ hasText: 'Output' }).first()).toContainText('$0.00004');
   await page.locator('#observation-3 .raw-history summary').click();
   await expect(page.locator('#observation-3 .raw-history pre')).toContainText('private system history');
   assert.equal(historyRequests.length, 1);
@@ -96,7 +176,27 @@ try {
   await page.getByRole('button', { name: 'Clear filters' }).click();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole('button', { name: 'Expand all', exact: true }).click();
+  assert.equal(await modelPrice.locator('.model-price-grid>div').evaluateAll(nodes => new Set(nodes.map(node => node.getBoundingClientRect().top)).size), 2);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  const assertGenerationFits = async () => {
+    assert.deepEqual(await page.locator('#observation-4').evaluate(card => {
+      const body = card.querySelector('.observation-body').getBoundingClientRect();
+      return ['.generation-grid', '.count-grid', '.execution', '.model-price', '.model-price-grid', '.usage-table', '.usage-bar-wrap'].filter(selector =>
+        [...card.querySelectorAll(selector)].some(node => node.getBoundingClientRect().right > body.right + 1 || node.getBoundingClientRect().left < body.left - 1));
+    }), []);
+    assert.equal(await page.locator('#observation-4 .count-grid').first().evaluate(node =>
+      [...node.children].every(child => child.getBoundingClientRect().right <= node.getBoundingClientRect().right + 1)), true);
+    assert.equal(await page.locator('#observation-4 .execution').evaluate(node =>
+      [...node.children].every(child => child.getBoundingClientRect().right <= node.getBoundingClientRect().right + 1)), true);
+  };
+  await assertGenerationFits();
+  for (const table of [composition, generation.locator('.usage-table')]) {
+    assert.equal(await table.locator('.usage-bar-wrap').evaluate(node => node.scrollWidth <= node.clientWidth), true);
+    assert.equal(await table.locator('.usage-bar').last().evaluate(node => node.getBoundingClientRect().width <= node.parentElement.getBoundingClientRect().width), true);
+  }
+  await page.setViewportSize({ width: 320, height: 720 });
+  await assertGenerationFits();
+  await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.locator('.is-open')).toHaveCount(4);
   const longTitle = 'A long first request that needs to be shortened in the session heading '.repeat(3).trim();
   records[0][p + 'input'][0].content = longTitle;
@@ -114,8 +214,25 @@ try {
   await expect(shortcuts.getByRole('link', { name: 'All sessions' })).toHaveAttribute('href', '/dashboard');
   await shortcuts.getByRole('checkbox', { name: 'Auto-refresh' }).check();
   await expect(page.locator('.workspace-toolbar').getByRole('checkbox', { name: 'Auto-refresh' })).toBeChecked();
+  const model = pricing.catalog['test-provider'].models['test-model'];
+  delete model.cost;
   await page.reload();
+  await page.locator('#observation-4 .observation-summary').click();
+  await expect(page.locator('#observation-4 .execution')).toContainText('Estimated cost · USD—');
+  await expect(page.locator('#observation-4 .usage-row.total-row')).toContainText('—');
+  await expect(page.locator('#observation-4 .usage-bar-note')).toHaveText('Pricing unavailable');
+  await expect(page.locator('#observation-4 .model-price-grid strong')).toHaveText(['—', '—', '—', '—']);
+  await expect(composition.locator('.usage-bar-note')).toHaveText('Pricing unavailable');
+  model.cost = { input: 0, output: 0, reasoning: 0, cache_read: 0, cache_write: 0 };
+  await page.reload();
+  await page.locator('#observation-4 .observation-summary').click();
   await expect(page.locator('.workspace-toolbar').getByRole('checkbox', { name: 'Auto-refresh' })).toBeChecked();
+  await expect(page.locator('.session-metrics .cost-estimate')).toHaveCount(0);
+  await expect(page.locator('.session-metrics .metric').filter({ hasText: 'Recorded cost' }).locator('.metric-bottom')).toHaveText('Across all generations');
+  await expect(page.locator('#observation-4 .usage-row.total-row')).toContainText('$0.00');
+  await expect(page.locator('#observation-4 .usage-bar-note')).toHaveCount(0);
+  await expect(page.locator('#observation-4 .model-price-grid strong')).toHaveText(['$0.00', '$0.00', '$0.00', '$0.00']);
+  await expect(composition.locator('.usage-bar-note')).toHaveCount(0);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
   await expect(page.locator('.floating-actions')).toBeHidden();

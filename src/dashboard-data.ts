@@ -1,5 +1,7 @@
 import { readFile, readdir, lstat } from 'node:fs/promises';
 import { join } from 'node:path';
+import { estimateGeneration, modelPrice, sumEstimates } from './model-pricing.js';
+import type { ModelPricing } from './model-pricing.js';
 
 type RecordValue = Record<string, any>;
 const prefix = 'langfuse.observation.';
@@ -42,7 +44,7 @@ function outputCounts(output: any) {
   };
 }
 
-export function parseSession(content: string, filename: string) {
+export function parseSession(content: string, filename: string, catalog: ModelPricing | null = null) {
   const warnings: string[] = [];
   const entries: { entry: RecordValue; id: number; time: bigint | null }[] = [];
   let state: RecordValue = {};
@@ -77,6 +79,7 @@ export function parseSession(content: string, filename: string) {
     if (typeof id === 'string') toolIndex.set(id, [...(toolIndex.get(id) ?? []), row]);
   }
   const attached = new Set<number>();
+  const recordedCallResults = new Set<number>();
   const items = entries.filter(({ entry }) => ['generation', 'event', 'user', 'tool'].includes(entry[prefix + 'type'])).map(row => {
     const { entry, id, time: timestamp } = row;
     const type = entry[prefix + 'type'] === 'event' ? 'user' : entry[prefix + 'type'];
@@ -87,7 +90,7 @@ export function parseSession(content: string, filename: string) {
     const calls = callsIn(output);
     const tools = calls.map(call => {
       const matches = typeof call.id === 'string' ? toolIndex.get(call.id) ?? [] : [];
-      matches.forEach(match => attached.add(match.id));
+      matches.forEach(match => { attached.add(match.id); recordedCallResults.add(match.id); });
       return { ...call, id: call.id, name: call.name, arguments: call.arguments, inferred: false, results: matches.map(match => ({ id: match.id, input: match.entry[prefix + 'input'], output: match.entry[prefix + 'output'], start: match.entry.startTimeUnixNano, end: match.entry.endTimeUnixNano })) };
     });
     const rawUsage = record(entry[prefix + 'usage_details']);
@@ -110,6 +113,8 @@ export function parseSession(content: string, filename: string) {
       counts: { total: messages.length, assistant: messages.filter(message => message?.role === 'assistant').length, user: messages.filter(message => message?.role === 'user').length, tool: messages.filter(message => message?.role === 'tool').length, toolCalls: calls.length },
       outputCounts: outputCounts(output),
       usage, reportedTotal, uncached, cacheHit, cost: numeric(record(entry[prefix + 'cost_details']).total), costDetails: entry[prefix + 'cost_details'] ?? null,
+      estimatedCost: type === 'generation' ? estimateGeneration(catalog, metadata.providerID ?? null, entry[prefix + 'model.name'] ?? null, usage) : null,
+      modelPrice: type === 'generation' ? modelPrice(catalog, metadata.providerID ?? null, entry[prefix + 'model.name'] ?? null, usage) : null,
       summary, reasoning, response, output: type === 'user' ? input : output ?? null, tools, input, metadata };
   });
   // A tool result may be recorded even when its generation output omits tool_calls.
@@ -148,12 +153,19 @@ export function parseSession(content: string, filename: string) {
   const durationMs = times.length < 2 ? null : Number(
     times.reduce((latest, value) => value > latest ? value : latest) - times.reduce((earliest, value) => value < earliest ? value : earliest)
   ) / 1e6;
+  const generationDurations = generations.map(item => item.duration);
+  const generationDurationMs = sum(generationDurations);
+  const estimatedCost = sumEstimates(generations.map(item => item.estimatedCost));
   const stats = { generations: generations.length, users: visibleItems.filter(item => item.type === 'user').length,
-    toolCalls: generations.reduce((total, item) => total + item.counts.toolCalls, 0), usage,
-    cost: sum(generations.map(item => item.cost)), reportedTotal: sum(generations.map(item => item.reportedTotal)), cacheHit: usage.input === null || usage.cache_read === null ? null : (usage.input + usage.cache_read + (usage.cache_write ?? 0)) ? usage.cache_read / (usage.input + usage.cache_read + (usage.cache_write ?? 0)) : 0,
+    // Output calls may have matching tool observations; count those only once.
+    // Other tool observations are still real calls even if output omitted tool_calls.
+    toolCalls: generations.reduce((total, item) => total + item.counts.toolCalls, 0)
+      + entries.filter(row => row.entry[prefix + 'type'] === 'tool' && !recordedCallResults.has(row.id)).length, usage,
+    cost: sum(generations.map(item => item.cost)), estimatedCost, reportedTotal: sum(generations.map(item => item.reportedTotal)), cacheHit: usage.input === null || usage.cache_read === null ? null : (usage.input + usage.cache_read + (usage.cache_write ?? 0)) ? usage.cache_read / (usage.input + usage.cache_read + (usage.cache_write ?? 0)) : 0,
     models: [...new Set(generations.map(item => item.model).filter(Boolean))] as string[],
     missingUsage: generations.filter(item => item.usage.total === null).length, missingCost: generations.filter(item => item.cost === null).length,
-    durationMs, durationPartial: times.length < entries.length };
+    durationMs, durationPartial: times.length < entries.length,
+    generationDurationMs, generationDurationPartial: generationDurations.some(value => value === null) };
   const preview = visibleItems.filter(item => item.type === 'user').at(-1)?.summary.slice(0, 220) ?? 'No user observations recorded';
   return { filename, preview, items: visibleItems, stats, warnings, observations: entries.length };
 }
@@ -168,13 +180,13 @@ export async function sessionFiles(directory: string) {
   }
 }
 
-export async function loadSession(directory: string, filename: string) {
+export async function loadSession(directory: string, filename: string, catalog: ModelPricing | null = null) {
   if (!filename.endsWith('.jsonl') || /[/\\:\0]/.test(filename) || filename === '.jsonl') return null;
   try {
     const path = join(directory, filename);
     const stat = await lstat(path);
     if (!stat.isFile() || stat.isSymbolicLink()) return null;
-    const session = parseSession(await readFile(path, 'utf8'), filename);
+    const session = parseSession(await readFile(path, 'utf8'), filename, catalog);
     return { ...session, bytes: stat.size, modified: stat.mtime.toISOString() };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;

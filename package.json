@@ -10,6 +10,7 @@
     "dist/config.js",
     "dist/dashboard-data.js",
     "dist/dashboard.js",
+    "dist/model-pricing.js",
     "dist/server.js",
     "dist/public/dashboard.js",
     "dist/public/dashboard.css",

@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { loadSession, sessionFiles } from './dashboard-data.js';
 const html = `<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="dark"><title>Session observatory</title><link rel="stylesheet" href="/dashboard/assets/dashboard.css"></head><body><div id="root"></div><script type="module" src="/dashboard/assets/dashboard.js"></script></body></html>`;
-export function registerDashboard(app, directory) {
+export function registerDashboard(app, directory, pricing) {
     app.get('/dashboard', async (_, reply) => reply.type('text/html').send(html));
     app.get('/dashboard/assets/:file', async (request, reply) => {
         const file = request.params.file;
@@ -19,9 +19,10 @@ export function registerDashboard(app, directory) {
     });
     app.get('/dashboard/api/sessions', async (_, reply) => {
         reply.header('Cache-Control', 'no-store');
+        await pricing.ready;
         const sessions = [];
         for (const filename of await sessionFiles(directory)) {
-            const session = await loadSession(directory, filename);
+            const session = await loadSession(directory, filename, pricing.catalog);
             if (session)
                 sessions.push({ filename, bytes: session.bytes, modified: session.modified, stats: session.stats, warnings: session.warnings,
                     preview: session.preview, observations: session.observations });
@@ -32,7 +33,8 @@ export function registerDashboard(app, directory) {
         reply.header('Cache-Control', 'no-store');
         if (typeof request.query.session !== 'string')
             return reply.code(400).send({ error: 'A session filename is required' });
-        const session = await loadSession(directory, request.query.session);
+        await pricing.ready;
+        const session = await loadSession(directory, request.query.session, pricing.catalog);
         if (!session)
             return reply.code(404).send({ error: 'Session not found' });
         if (request.query.item !== undefined) {

@@ -166,7 +166,7 @@ function changedFields(attributes, state) {
     }
     return entry;
 }
-export function createApp(writeLine = (line) => process.stdout.write(line), dataDirectory = defaultDataDirectory(), now = () => new Date(), retentionDays = 30) {
+export function createApp(writeLine = (line) => process.stdout.write(line), dataDirectory = defaultDataDirectory(), now = () => new Date(), retentionDays = 30, pricing = { catalog: null }) {
     const app = Fastify();
     const pending = new Map();
     const sessions = new Map();
@@ -325,7 +325,7 @@ export function createApp(writeLine = (line) => process.stdout.write(line), data
         }, null, 2)}\n`);
         reply.code(204).send();
     });
-    registerDashboard(app, dataDirectory);
+    registerDashboard(app, dataDirectory, pricing);
     app.all('/', async () => { });
     app.all('/*', async () => { });
     return app;

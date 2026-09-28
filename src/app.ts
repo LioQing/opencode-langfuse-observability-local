@@ -5,6 +5,7 @@ import { extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { registerDashboard } from './dashboard.js';
+import type { PricingStore } from './model-pricing.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -177,6 +178,7 @@ export function createApp(
   dataDirectory = defaultDataDirectory(),
   now: () => Date = () => new Date(),
   retentionDays = 30,
+  pricing: PricingStore = { catalog: null },
 ) {
   const app = Fastify();
   const pending = new Map<string, Promise<void>>();
@@ -331,7 +333,7 @@ export function createApp(
     reply.code(204).send();
   });
 
-  registerDashboard(app, dataDirectory);
+  registerDashboard(app, dataDirectory, pricing);
   app.all('/', async () => {});
   app.all('/*', async () => {});
 
