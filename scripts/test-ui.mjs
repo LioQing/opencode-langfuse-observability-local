@@ -33,7 +33,19 @@ try {
   await expect(page.getByText('No matching sessions')).toBeVisible();
   await page.getByRole('button', { name: 'Clear search' }).click();
   await expect(page.locator('.session-link h3')).toHaveText('Search for a test result');
-  await expect(page.locator('.metrics .cost-estimate')).toContainText('Estimated $0.00047');
+  await expect(page.locator('.metrics .cost-estimate')).toHaveText('Estimated $0.00047');
+  await expect(page.locator('.session-link .session-number').last().locator('small')).toHaveText('estimated $0.00047');
+  const unavailableSessions = [
+    ['missing-usage.jsonl', { [p + 'type']: 'generation', [p + 'model.name']: 'test-model', [p + 'metadata']: { providerID: 'test-provider' } }],
+    ['missing-pricing.jsonl', { ...records[2], [p + 'model.name']: 'unknown-model' }],
+  ];
+  for (const [name, record] of unavailableSessions) await writeFile(join(directory, name), serialize([record]));
+  await page.reload();
+  await expect(page.locator('.session-link')).toHaveCount(3);
+  await expect(page.locator('.metrics .cost-estimate')).toHaveText('Estimated $0.00047');
+  for (const [name] of unavailableSessions) await rm(join(directory, name));
+  await page.reload();
+  await expect(page.locator('.session-link')).toHaveCount(1);
   await page.locator('.session-link').click();
   await expect(page.locator('h1')).toHaveText('Search for a test result');
   await expect(page.locator('.session-filename')).toHaveText(filename);
@@ -46,11 +58,7 @@ try {
   await expect(speedMetric.locator('strong small')).toHaveText('tokens/s');
   await expect(speedMetric.locator('.metric-bottom')).toContainText('Actual · 14.0 tokens/s');
   await expect(speedMetric.locator('.metric-bottom')).toContainText('Output + reasoning + cached output');
-  await expect(page.locator('.session-metrics .cost-estimate')).toContainText('Estimated $0.00047');
-  await expect(page.locator('.session-metrics .cost-estimate')).toContainText('$0.00015 in');
-  await expect(page.locator('.session-metrics .cost-estimate')).toContainText('$0.00013 out');
-  await expect(page.locator('.session-metrics .cost-estimate')).toContainText('$0.000185 cached in');
-  await expect(page.locator('.session-metrics .cost-estimate')).toContainText('$0.000005 cached out');
+  await expect(page.locator('.session-metrics .cost-estimate span')).toHaveText(['Estimated $0.00047', '$0.00015 in', '$0.00013 out', '$0.000185 cached in', '$0.000005 cached out']);
   const composition = page.locator('.mix-panel .usage-table');
   await expect(composition.locator('.usage-row.table-head')).toContainText('% of total $');
   await expect(composition.locator('.usage-row.total-row')).toContainText('$0.00047');
@@ -223,12 +231,12 @@ try {
   await expect(page.locator('#observation-4 .usage-bar-note')).toHaveText('Pricing unavailable');
   await expect(page.locator('#observation-4 .model-price-grid strong')).toHaveText(['—', '—', '—', '—']);
   await expect(composition.locator('.usage-bar-note')).toHaveText('Pricing unavailable');
+  await expect(page.locator('.session-metrics .cost-estimate')).toHaveText('Estimated —');
   model.cost = { input: 0, output: 0, reasoning: 0, cache_read: 0, cache_write: 0 };
   await page.reload();
   await page.locator('#observation-4 .observation-summary').click();
   await expect(page.locator('.workspace-toolbar').getByRole('checkbox', { name: 'Auto-refresh' })).toBeChecked();
-  await expect(page.locator('.session-metrics .cost-estimate')).toHaveCount(0);
-  await expect(page.locator('.session-metrics .metric').filter({ hasText: 'Recorded cost' }).locator('.metric-bottom')).toHaveText('Across all generations');
+  await expect(page.locator('.session-metrics .cost-estimate span')).toHaveText(['Estimated $0.00', '$0.00 in', '$0.00 out', '$0.00 cached in', '$0.00 cached out']);
   await expect(page.locator('#observation-4 .usage-row.total-row')).toContainText('$0.00');
   await expect(page.locator('#observation-4 .usage-bar-note')).toHaveCount(0);
   await expect(page.locator('#observation-4 .model-price-grid strong')).toHaveText(['$0.00', '$0.00', '$0.00', '$0.00']);
@@ -245,6 +253,8 @@ try {
   await expect(page.getByRole('alert')).toContainText('Session not found');
   await page.getByRole('link', { name: 'Back to library' }).click();
   await expect(page.locator('.session-link')).toHaveCount(1);
+  await expect(page.locator('.metrics .cost-estimate')).toHaveText('Estimated $0.00');
+  await expect(page.locator('.session-link .session-number').last().locator('small')).toHaveText('estimated $0.00');
   await expect(page.locator('.workspace-toolbar').getByRole('checkbox', { name: 'Auto-refresh' })).toBeChecked();
   await page.locator('.workspace-toolbar').getByRole('checkbox', { name: 'Auto-refresh' }).uncheck();
   await page.reload();
