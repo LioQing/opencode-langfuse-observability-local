@@ -3,8 +3,7 @@ import { createRoot } from 'react-dom/client';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { useGSAP } from '@gsap/react';
-import Markdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { TextContent } from './text-content.js';
 import '@fontsource/geist/latin-400.css';
 import '@fontsource/geist/latin-500.css';
 import '@fontsource/geist/latin-600.css';
@@ -157,38 +156,20 @@ function Analytics({ session, onSelect }: { session: SessionView; onSelect: (id:
   </section>;
 }
 
-function Content({ value }: { value: any }) {
+function Content({ value, tool = false }: { value: any; tool?: boolean }) {
   if (value == null) return <p className="subtle">No output recorded.</p>;
-  if (typeof value === 'string') return value ? <MarkdownText text={value} /> : null;
+  if (tool) return <TextContent value={typeof value.output === 'string' ? value.output : value} />;
+  if (typeof value === 'string') return value ? <TextContent value={value} defaultView="markdown" /> : null;
   if (Array.isArray(value)) return <>{value.map((part, index) => <Content key={index} value={part} />)}</>;
   if (typeof value !== 'object') return <pre>{pretty(value)}</pre>;
   if (value.role || value.type === 'text' || value.type === 'thinking' || value.type === 'reasoning') {
     return <div className="message-content">{value.thinking && <details className="nested reasoning"><summary>Reasoning</summary><Content value={value.thinking} /></details>}
       <Content value={value.text ?? value.content} />
-      {value.tool_calls?.length > 0 && <div className="call-list">{value.tool_calls.map((call: any, i: number) => <div className="call" key={i}><div><Icon name="tool" /><strong>{call.name ?? call.function?.name ?? 'Tool call'}</strong><code>{call.id}</code></div><pre>{prettyArguments(call.arguments ?? call.function?.arguments)}</pre></div>)}</div>}
+      {value.tool_calls?.length > 0 && <div className="call-list">{value.tool_calls.map((call: any, i: number) => <div className="call" key={i}><div><Icon name="tool" /><strong>{call.name ?? call.function?.name ?? 'Tool call'}</strong><code>{call.id}</code></div><TextContent value={call.arguments ?? call.function?.arguments} /></div>)}</div>}
     </div>;
   }
-  if (typeof value.output === 'string') return <MarkdownText text={value.output} />;
-  return <pre>{pretty(value)}</pre>;
-}
-
-function MarkdownText({ text }: { text: string }) {
-  const [view, setView] = useState<'markdown' | 'raw'>('markdown');
-  return <div className="text-content">
-    <div className="text-view-toggle" role="group" aria-label="Text display mode">
-      <button type="button" aria-pressed={view === 'markdown'} onClick={() => setView('markdown')}>Markdown</button>
-      <button type="button" aria-pressed={view === 'raw'} onClick={() => setView('raw')}>Raw</button>
-    </div>
-    {view === 'raw' ? <pre><code>{text}</code></pre> : <div className="prose"><Markdown remarkPlugins={[remarkGfm]} skipHtml components={{
-      a: ({ href, children }) => <a href={href} target="_blank" rel="noreferrer">{children}</a>,
-      img: ({ alt }) => <span className="subtle">[Image: {alt || 'attachment'}]</span>,
-    }}>{text}</Markdown></div>}
-  </div>;
-}
-
-function prettyArguments(value: unknown) {
-  if (typeof value === 'string') { try { return pretty(JSON.parse(value)); } catch {} }
-  return pretty(value);
+  if (typeof value.output === 'string') return <TextContent value={value.output} defaultView="markdown" />;
+  return <TextContent value={value} />;
 }
 
 function RawHistory({ filename, id }: { filename: string; id: number }) {
@@ -221,8 +202,8 @@ function ObservationCard({ item, filename, open, onToggle }: { item: Observation
       {generation && <><div className="identity-grid">{[['Provider', item.provider], ['Model', item.model], ['Variant', item.variant], ['Mode', item.mode]].map(([label, value]) => <div key={label}><span>{label}</span><strong>{value ?? 'Not recorded'}</strong></div>)}</div>
             <div className="generation-grid"><div><h3>Context & execution</h3><h4 className="count-heading">Input history</h4><div className="count-grid">{([['Messages', item.counts.total], ['Assistant', item.counts.assistant], ['User', item.counts.user], ['Tool', item.counts.tool]] as [string, number][]).map(([label, value]) => <div key={label}><strong>{format(value)}</strong><span>{label}</span></div>)}</div><p className="note">Other roles may also appear in the input total.</p><h4 className="count-heading">Generation output</h4><div className="count-grid">{([['Tool calls', item.output == null ? null : item.counts.toolCalls], ['Tool results', item.tools.reduce((total, tool) => total + tool.results.length, 0)], ['Responses', item.outputCounts.responses], ['Reasoning', item.outputCounts.reasoning]] as [string, number | null][]).map(([label, value]) => <div key={label}><strong>{format(value)}</strong><span>{label}</span></div>)}</div><p className="note">Responses and reasoning count messages with text or thinking, not tokens. Tool results count linked observations. A dash means output was not recorded.</p><div className="execution"><div><span>Cache hit</span><strong>{percent(item.cacheHit)}</strong></div><div><span>Recorded cost</span><strong>{money(item.cost)}</strong></div><div><span>Estimated cost</span><strong>{money(item.estimatedCost?.total ?? null)}</strong></div><div><span>Duration</span><strong>{item.duration == null ? '—' : `${(item.duration / 1000).toFixed(2)}s`}</strong></div></div><p className="note">Cache hit = cache read ÷ (input + cache read + cache write). Input is already uncached. A dash means not recorded or pricing unavailable.</p></div><div><ModelPrice price={item.modelPrice} /><h3>Token usage & cost</h3><UsageTable usage={item.usage} reportedTotal={item.reportedTotal} estimatedCost={item.estimatedCost} /></div></div>
       </>}
-      <div className="output"><h3>{item.type === 'user' ? 'User message' : generation ? 'Generation output' : 'Tool output'}</h3><Content value={item.output} /></div>
-       {item.tools.length > 0 && <div className="tool-results"><h3>Tool results <span className="count-badge">{item.tools.length}</span></h3>{item.tools.map((tool: any, index: number) => <div className="tool-result" key={`${tool.id}-${index}`}><div className="tool-heading"><span><Icon name="tool" /><strong>{tool.name ?? 'Tool'}</strong></span><code>{tool.id ?? 'No call ID'}</code><span className={tool.results.length ? 'status' : 'subtle'}>{tool.inferred ? 'Inferred from timing' : tool.results.length ? 'Recorded' : 'Awaiting result'}</span></div>{tool.results.length ? tool.results.map((result: any) => <div key={result.id}><details className="nested"><summary>Tool input</summary><pre>{pretty(result.input)}</pre></details><Content value={result.output} /></div>) : <p className="note">No matching tool observation in this file yet.</p>}</div>)}</div>}
+      <div className="output"><h3>{item.type === 'user' ? 'User message' : generation ? 'Generation output' : 'Tool output'}</h3><Content value={item.output} tool={item.type === 'tool'} /></div>
+       {item.tools.length > 0 && <div className="tool-results"><h3>Tool results <span className="count-badge">{item.tools.length}</span></h3>{item.tools.map((tool: any, index: number) => <div className="tool-result" key={`${tool.id}-${index}`}><div className="tool-heading"><span><Icon name="tool" /><strong>{tool.name ?? 'Tool'}</strong></span><code>{tool.id ?? 'No call ID'}</code><span className={tool.results.length ? 'status' : 'subtle'}>{tool.inferred ? 'Inferred from timing' : tool.results.length ? 'Recorded' : 'Awaiting result'}</span></div>{tool.results.length ? tool.results.map((result: any) => <div key={result.id}><details className="nested"><summary>Tool input</summary><TextContent value={result.input} /></details><Content value={result.output} tool /></div>) : <p className="note">No matching tool observation in this file yet.</p>}</div>)}</div>}
       <RawHistory filename={filename} id={item.id} />
     </div>}
   </article>;

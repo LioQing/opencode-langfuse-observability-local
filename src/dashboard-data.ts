@@ -103,7 +103,7 @@ export function parseSession(content: string, filename: string, catalog: ModelPr
     const cacheHit = usage.input === null || usage.cache_read === null ? null : inputTotal === 0 ? 0 : usage.cache_read / inputTotal;
     let duration: number | null = null;
     try { if (timestamp !== null && entry.endTimeUnixNano) duration = Math.max(0, Number(BigInt(entry.endTimeUnixNano) - timestamp) / 1e6); } catch {}
-    const reasoning = array(output).some(message => textContent(message.thinking) || array(message.content).some(part => part.type === 'reasoning')) || (usage.reasoning ?? 0) > 0;
+    const reasoning = array(output).some(message => textContent(message?.thinking) || array(message?.content).some(part => part?.type === 'reasoning')) || (usage.reasoning ?? 0) > 0;
     const response = Boolean(textContent(output));
     const summary = type === 'user' ? textContent(input) || 'User observation'
       : type === 'tool' ? `Tool · ${metadata.tool ?? 'unknown'}`

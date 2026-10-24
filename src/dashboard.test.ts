@@ -10,6 +10,13 @@ import type { PricingStore } from './model-pricing.js';
 const p = 'langfuse.observation.';
 const lines = (...entries: unknown[]) => entries.map(entry => JSON.stringify(entry)).join('\n') + '\n';
 
+test('preserves structured tool arrays containing nulls and primitive values', () => {
+  const output = [{}, [], true, null, { type: 'text', text: 'Complete object' }];
+  const session = parseSession(lines({ [p + 'type']: 'tool', [p + 'output']: output }), 'structured.jsonl');
+  assert.deepEqual(session.items[0].output, output);
+  assert.equal(session.items[0].reasoning, false);
+});
+
 test('reconstructs generation deltas in file order before newest-first nanosecond sorting and links early tool results', () => {
   const session = parseSession(lines(
     { [p + 'type']: 'event', [p + 'input']: [{ role: 'user', content: [{ type: 'text', text: 'Find something' }] }], startTimeUnixNano: '1790494890000000000' },

@@ -111,7 +111,7 @@ export function parseSession(content, filename, catalog = null) {
                 duration = Math.max(0, Number(BigInt(entry.endTimeUnixNano) - timestamp) / 1e6);
         }
         catch { }
-        const reasoning = array(output).some(message => textContent(message.thinking) || array(message.content).some(part => part.type === 'reasoning')) || (usage.reasoning ?? 0) > 0;
+        const reasoning = array(output).some(message => textContent(message?.thinking) || array(message?.content).some(part => part?.type === 'reasoning')) || (usage.reasoning ?? 0) > 0;
         const response = Boolean(textContent(output));
         const summary = type === 'user' ? textContent(input) || 'User observation'
             : type === 'tool' ? `Tool · ${metadata.tool ?? 'unknown'}`

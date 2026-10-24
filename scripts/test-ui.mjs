@@ -8,10 +8,12 @@ import { createApp } from '../dist/app.js';
 const directory = await mkdtemp(join(tmpdir(), 'observatory-ui-'));
 const p = 'langfuse.observation.';
 const filename = '2026-09-27-15-59-36-ses_browser.jsonl';
+const toolArguments = JSON.stringify({ query: 'test', command: 'echo first\necho second', config: { enabled: true, limit: 3, empty: null }, items: Array.from({ length: 120 }, (_, index) => index) });
+const toolOutput = 'Matched tool result\n' + JSON.stringify({ status: 'ok', content: '<script>window.untrustedExecuted=true</script>\nsecond line' }) + '\n[1,false,null]\nFinished\n{invalid JSON}\n';
 const records = [
   { [p + 'type']: 'event', [p + 'input']: [{ role: 'user', content: 'Search for a test result' }], startTimeUnixNano: '1790495971615000000' },
-  { [p + 'type']: 'tool', [p + 'metadata']: { callID: 'call_browser', tool: 'websearch' }, [p + 'input']: { query: 'test' }, [p + 'output']: { output: 'Matched tool result' }, startTimeUnixNano: '1790496018942000000' },
-  { [p + 'type']: 'generation', [p + 'model.name']: 'test-model', [p + 'metadata']: { providerID: 'test-provider', variant: 'medium', mode: 'build' }, [p + 'input']: { system: ['private system history'], messages: [{ role: 'user', content: 'Search' }] }, [p + 'output']: [{ role: 'assistant', thinking: [{ type: 'thinking', content: 'Looking it up' }], tool_calls: [{ id: 'call_browser', name: 'websearch', arguments: '{"query":"test"}' }] }], [p + 'usage_details']: { input: 100, output: 20, reasoning: 10, cache_read: 900, cache_write: 10, total: 130 }, [p + 'cost_details']: { total: 0 }, startTimeUnixNano: '1790496016931000000', endTimeUnixNano: '1790496018931000000' },
+  { [p + 'type']: 'tool', [p + 'metadata']: { callID: 'call_browser', tool: 'websearch' }, [p + 'input']: { query: 'test' }, [p + 'output']: { output: toolOutput }, startTimeUnixNano: '1790496018942000000' },
+  { [p + 'type']: 'generation', [p + 'model.name']: 'test-model', [p + 'metadata']: { providerID: 'test-provider', variant: 'medium', mode: 'build' }, [p + 'input']: { system: ['private system history'], messages: [{ role: 'user', content: 'Search' }] }, [p + 'output']: [{ role: 'assistant', thinking: [{ type: 'thinking', content: 'Looking it up' }], tool_calls: [{ id: 'call_browser', name: 'websearch', arguments: toolArguments }] }], [p + 'usage_details']: { input: 100, output: 20, reasoning: 10, cache_read: 900, cache_write: 10, total: 130 }, [p + 'cost_details']: { total: 0 }, startTimeUnixNano: '1790496016931000000', endTimeUnixNano: '1790496018931000000' },
   { [p + 'type']: 'generation', [p + 'input']: { messages: [{ role: 'user' }, { role: 'assistant' }, { role: 'tool' }] }, [p + 'output']: [{ role: 'assistant', content: '**Final answer**\n\n<script>window.untrustedExecuted=true</script>\n\n[Unsafe](javascript:alert(1))' }], [p + 'usage_details']: { input: 50, output: 30, reasoning: 0, cache_read: 950, cache_write: 0, total: 80 }, [p + 'cost_details']: { total: 0 }, startTimeUnixNano: '1790496026931000000', endTimeUnixNano: '1790496029931000000' },
 ];
 const serialize = values => values.map(value => JSON.stringify(value)).join('\n') + '\n';
@@ -55,14 +57,14 @@ try {
   await expect(durationMetric.locator('.metric-bottom')).toContainText('Generation time 5s · 9.0%');
   const speedMetric = page.locator('.session-metrics .metric').filter({ hasText: 'Effective token speed' });
   await expect(speedMetric.locator('strong')).toContainText('1.3');
-  await expect(speedMetric.locator('strong small')).toHaveText('tokens/s');
+  await expect(speedMetric.locator('strong')).toHaveText('1.3 t/s');
   await expect(speedMetric.locator('.metric-bottom')).toContainText('Actual · 14.0 tokens/s');
   await expect(speedMetric.locator('.metric-bottom')).toContainText('Output + reasoning + cached output');
   await expect(page.locator('.session-metrics .cost-estimate span')).toHaveText(['Estimated $0.00047', '$0.00015 in', '$0.00013 out', '$0.000185 cached in', '$0.000005 cached out']);
   const composition = page.locator('.mix-panel .usage-table');
   await expect(composition.locator('.usage-row.table-head')).toContainText('% of total $');
   await expect(composition.locator('.usage-row.total-row')).toContainText('$0.00047');
-  await expect(composition.locator('.usage-bar-label')).toHaveText(['Tokens', 'Estimated cost · USD']);
+  await expect(composition.locator('.usage-bar-label')).toHaveText(['Tokens', 'Estimated cost']);
   await expect(composition.getByRole('group', { name: 'Estimated cost composition by category' }).locator('.usage-segment')).toHaveCount(5);
   const chart = page.locator('.volume-panel .bar-chart');
   assert.equal(await chart.evaluate(node => node.getBoundingClientRect().height > 250), true);
@@ -98,8 +100,8 @@ try {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await chart.locator('.layout-test-column').evaluateAll(columns => columns.forEach(column => column.remove()));
   const generation = page.locator('#observation-4');
-  await expect(generation.getByText('Recorded cost · USD')).toBeVisible();
-  await expect(generation.locator('.execution').getByText('Estimated cost · USD')).toBeVisible();
+  await expect(generation.locator('.execution').getByText('Recorded cost', { exact: true })).toBeVisible();
+  await expect(generation.locator('.execution').getByText('Estimated cost', { exact: true })).toBeVisible();
   await expect(generation.locator('.execution')).toContainText('$0.000205');
   const modelPrice = generation.getByRole('region', { name: 'Model price' });
   await expect(modelPrice).toContainText('USD / 1M tokens');
@@ -114,7 +116,7 @@ try {
   await expect(generation.locator('.usage-row').filter({ hasText: 'Output' }).first()).toContainText('$0.00006');
   await expect(generation.locator('.usage-row').filter({ hasText: 'Cached input' })).toContainText('$0.000095');
   await expect(generation.locator('.usage-row.total-row')).toContainText('$0.000205');
-  await expect(generation.locator('.usage-bar-label')).toHaveText(['Tokens', 'Estimated cost · USD']);
+  await expect(generation.locator('.usage-bar-label')).toHaveText(['Tokens', 'Estimated cost']);
   await expect(generation.getByRole('group', { name: 'Estimated cost composition by category' }).locator('.usage-segment')).toHaveCount(3);
   await generation.getByRole('button', { name: /Cached input: \$0\.000095/ }).hover();
   await expect(generation.getByRole('tooltip')).toContainText('46.3% of estimated cost');
@@ -151,9 +153,40 @@ try {
   await page.locator('#observation-3 .observation-summary').click();
   assert.deepEqual(await topBorders(), ['1px', '1px', '1px']);
   await expect(page.locator('#observation-3 .tool-results')).toContainText('Matched tool result');
-  const toolText = page.locator('#observation-3 .tool-result .text-content');
+  const argumentsView = page.locator('#observation-3 .call .text-content');
+  await expect(argumentsView.getByRole('button', { name: 'Formatted', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(argumentsView.locator('.json-string-block code')).toHaveText('echo first\necho second');
+  await expect(argumentsView.locator('.json-boolean')).toHaveText('true');
+  await expect(argumentsView.locator('.json-null')).toHaveText('null');
+  const itemsNode = argumentsView.locator('.json-entry').filter({ hasText: /^"items":/ }).locator('.json-node');
+  await expect(itemsNode).not.toHaveAttribute('open');
+  await expect(itemsNode.locator('.json-entry')).toHaveCount(0);
+  await itemsNode.locator('summary').click();
+  await expect(itemsNode.locator('.json-entry')).toHaveCount(100);
+  await itemsNode.getByRole('button', { name: 'Show next 20 of 20 remaining' }).click();
+  await expect(itemsNode.locator('.json-entry')).toHaveCount(120);
+  await itemsNode.locator('summary').click();
+  await expect(itemsNode.locator('.json-entry')).toHaveCount(0);
+  await argumentsView.getByRole('button', { name: 'Raw', exact: true }).click();
+  await expect(argumentsView.locator('pre code')).toHaveText(toolArguments);
+  await argumentsView.getByRole('button', { name: 'Formatted', exact: true }).click();
+  const toolInput = page.locator('#observation-3 .tool-result .nested').first();
+  await toolInput.locator('summary').first().click();
+  await expect(toolInput.locator('.json-key')).toHaveText('"query": ');
+  await toolInput.getByRole('button', { name: 'Raw', exact: true }).click();
+  await expect(toolInput.locator('pre code')).toHaveText(JSON.stringify({ query: 'test' }, null, 2));
+  await toolInput.locator('summary').first().click();
+  const toolText = page.locator('#observation-3 .tool-result > div > .text-content');
+  await expect(toolText.getByRole('button', { name: 'Formatted', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(toolText.locator('.formatted-content > .json-view')).toHaveCount(2);
+  await expect(toolText.locator('.formatted-text')).toHaveText(['Matched tool result\n', 'Finished\n{invalid JSON}\n']);
+  await expect(toolText.locator('.json-string-block code')).toHaveText('<script>window.untrustedExecuted=true</script>\nsecond line');
+  assert.equal(await page.evaluate(() => window.untrustedExecuted), undefined);
   await toolText.getByRole('button', { name: 'Raw' }).click();
-  await expect(toolText.locator('pre code')).toHaveText('Matched tool result');
+  await expect(toolText.locator('pre code')).toHaveText(toolOutput);
+  await toolText.getByRole('button', { name: 'Markdown', exact: true }).click();
+  assert.equal(await page.evaluate(() => window.untrustedExecuted), undefined);
+  await toolText.getByRole('button', { name: 'Formatted', exact: true }).click();
   await expect(answer.getByRole('button', { name: 'Markdown' })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('#observation-3')).toContainText('89.1%');
   await expect(page.locator('#observation-3 .usage-row').filter({ hasText: 'Reasoning' })).toContainText('$0.00003');
@@ -204,6 +237,9 @@ try {
   }
   await page.setViewportSize({ width: 320, height: 720 });
   await assertGenerationFits();
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  assert.equal(await argumentsView.evaluate(node => getComputedStyle(node).display), 'block');
+  assert.equal(await toolText.locator('.json-view').first().evaluate(node => node.scrollWidth <= node.clientWidth), true);
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.locator('.is-open')).toHaveCount(4);
   const longTitle = 'A long first request that needs to be shortened in the session heading '.repeat(3).trim();
@@ -226,7 +262,7 @@ try {
   delete model.cost;
   await page.reload();
   await page.locator('#observation-4 .observation-summary').click();
-  await expect(page.locator('#observation-4 .execution')).toContainText('Estimated cost · USD—');
+  await expect(page.locator('#observation-4 .execution')).toContainText('Estimated cost—');
   await expect(page.locator('#observation-4 .usage-row.total-row')).toContainText('—');
   await expect(page.locator('#observation-4 .usage-bar-note')).toHaveText('Pricing unavailable');
   await expect(page.locator('#observation-4 .model-price-grid strong')).toHaveText(['—', '—', '—', '—']);
@@ -260,8 +296,28 @@ try {
   await page.reload();
   await expect(page.locator('.workspace-toolbar').getByRole('checkbox', { name: 'Auto-refresh' })).not.toBeChecked();
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  const payloads = [
+    { role: 'admin', content: 'JSON data, not a message envelope', enabled: true },
+    [{}, [], true, null, { type: 'text', text: 'Keep the complete object' }],
+    '{\n  "nested": {"empty": []},\n  "ok": true\n}',
+  ];
+  await writeFile(join(directory, 'formatted-payloads.jsonl'), serialize(payloads.map((output, index) => ({
+    [p + 'type']: 'tool', [p + 'metadata']: { tool: 'fixture' }, [p + 'output']: output,
+    startTimeUnixNano: `${1790496100 + index}000000000`,
+  }))));
+  await page.goto(`${address}/dashboard?session=formatted-payloads.jsonl`);
+  await page.getByRole('button', { name: 'Expand all', exact: true }).click();
+  for (const [index, payload] of payloads.entries()) {
+    const content = page.locator(`#observation-${index + 1} .output .text-content`);
+    await expect(content.locator('.json-view')).toHaveCount(1);
+    await content.getByRole('button', { name: 'Raw', exact: true }).click();
+    await expect(content.locator('pre code')).toHaveText(typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2));
+    await content.getByRole('button', { name: 'Formatted', exact: true }).click();
+  }
+  await expect(page.locator('#observation-1 .json-key')).toHaveText(['"role": ', '"content": ', '"enabled": ']);
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   assert.deepEqual(errors, []);
-  console.log('Browser checks passed: library search, navigation, newest-first timeline, expansion, tool matching, lazy history, chart navigation, filtering, refresh, Markdown safety, mobile layout, and error recovery.');
+  console.log('Browser checks passed: library search, navigation, newest-first timeline, expansion, tool matching, formatted JSON and mixed text, exact raw arguments, decoded strings, lazy JSON expansion, lazy history, chart navigation, filtering, refresh, Markdown safety, mobile layout, and error recovery.');
 } finally {
   await browser?.close();
   await app.close();
