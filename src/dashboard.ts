@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { loadSession, sessionFiles } from './dashboard-data.js';
 import type { PricingStore } from './model-pricing.js';
 
-const html = `<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="dark"><title>Session observatory</title><link rel="stylesheet" href="/dashboard/assets/dashboard.css"></head><body><div id="root"></div><script type="module" src="/dashboard/assets/dashboard.js"></script></body></html>`;
+const html = `<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="application-name" content="opencode-langfuse-observability-local"><meta name="color-scheme" content="dark light"><meta name="description" content="OpenCode Langfuse Observability Local (OLOL): local sessions, token usage, costs and tool calls."><title>OLOL · OpenCode Langfuse Observability Local</title><link rel="stylesheet" href="/dashboard/assets/dashboard.css"></head><body><div id="root"></div><script type="module" src="/dashboard/assets/dashboard.js"></script></body></html>`;
 export function registerDashboard(app: FastifyInstance, directory: string, pricing: PricingStore) {
   app.get('/dashboard', async (_, reply) => reply.type('text/html').send(html));
   app.get<{ Params: { file: string } }>('/dashboard/assets/:file', async (request, reply) => {

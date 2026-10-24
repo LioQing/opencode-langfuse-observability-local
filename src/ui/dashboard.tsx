@@ -4,9 +4,6 @@ import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { useGSAP } from '@gsap/react';
 import { TextContent } from './text-content.js';
-import '@fontsource/geist/latin-400.css';
-import '@fontsource/geist/latin-500.css';
-import '@fontsource/geist/latin-600.css';
 import './dashboard.css';
 import type { Session, Item } from '../dashboard-data.js';
 import type { CostEstimate } from '../model-pricing.js';
@@ -34,7 +31,7 @@ const speedText = (rate: number | null) => rate === null ? '—' : new Intl.Numb
 const date = (value: string | null) => value ? new Date(value).toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'Time unavailable';
 const pretty = (value: unknown) => typeof value === 'string' ? value : JSON.stringify(value, null, 2) ?? 'Not recorded';
 const usageLabels = { input: 'Input', output: 'Output', reasoning: 'Reasoning', reportedTotal: 'Subtotal excl. cache', cache_read: 'Cached input', cache_write: 'Cached output', total: 'Total incl. cache' };
-const usageColors = { input: '#c3ee8c', output: '#a8b9fa', cache_read: '#62cbb4', cache_write: '#e5c58d', reasoning: '#ca9ce1', total: '#eceee9' };
+const usageColors = { input: 'var(--token-input)', output: 'var(--token-output)', cache_read: 'var(--token-cache-read)', cache_write: 'var(--token-cache-write)', reasoning: 'var(--token-reasoning)' };
 type Usage = Item['usage'];
 const usageCategories = ['input', 'output', 'reasoning', 'cache_read', 'cache_write'] as const;
 
@@ -105,7 +102,7 @@ function UsageTable({ usage, reportedTotal, estimatedCost }: { usage: Usage; rep
       const ratio = value == null || usage.total == null ? null : usage.total ? value / usage.total : 0;
       const cost = !estimatedCost ? null : key === 'total' ? estimatedCost.total : key === 'reportedTotal' ? estimatedCost.input + estimatedCost.output : categoryCost(key as typeof usageCategories[number]);
       const costRatio = cost === null || !estimatedCost ? null : estimatedCost.total ? cost / estimatedCost.total : 0;
-      return <div className={`usage-row${key === 'reportedTotal' ? ' subtotal-row' : key === 'total' ? ' total-row' : ''}`} key={key}><span>{key !== 'reportedTotal' && key !== 'total' && <i style={{ background: usageColors[key as keyof Usage] }} />}{label}</span><span>{format(value)}</span><span className="usage-percent">{percent(ratio)}</span>{estimatedCost !== undefined && <><span>{money(cost)}</span><span className="usage-percent">{percent(costRatio)}</span></>}</div>;
+      return <div className={`usage-row${key === 'reportedTotal' ? ' subtotal-row' : key === 'total' ? ' total-row' : ''}`} key={key}><span>{key !== 'reportedTotal' && key !== 'total' && <i style={{ background: usageColors[key as keyof typeof usageColors] }} />}{label}</span><span>{format(value)}</span><span className="usage-percent">{percent(ratio)}</span>{estimatedCost !== undefined && <><span>{money(cost)}</span><span className="usage-percent">{percent(costRatio)}</span></>}</div>;
     })}</div>
     <div className="usage-bar-wrap">
       {estimatedCost !== undefined && <span className="usage-bar-label">Tokens</span>}
@@ -143,7 +140,7 @@ function Analytics({ session, onSelect }: { session: SessionView; onSelect: (id:
   const generations = session.items.filter(item => item.type === 'generation').reverse();
   const value = (item: Observation) => measure === 'total' ? item.usage.total : item[measure];
   const max = Math.max(1, ...generations.map(item => value(item) ?? 0));
-  return <section className="analytics chapter" aria-label="Session analytics"><div className="section-heading"><div><span className="eyebrow">The bigger picture</span><h2>Every token tells a story.</h2></div><span className="subtle">Select a bar to inspect its generation</span></div>
+  return <section className="analytics chapter" aria-label="Session analytics"><div className="section-heading"><div><span className="eyebrow">Usage &amp; cost</span><h2>Session analytics</h2></div><span className="subtle">Select a bar to inspect its generation</span></div>
     <div className="analytics-panels">
       <div className="analysis-panel volume-panel"><div className="panel-heading"><span className="panel-title">Generation footprint</span><select aria-label="Chart measure" value={measure} onChange={event => setMeasure(event.target.value as typeof measure)}><option value="total">Total tokens</option><option value="uncached">Uncached input</option><option value="cost">Cost (USD)</option></select></div>
         <div className="chart-label"><span>{measure === 'cost' ? money(max === 1 && generations.every(item => !item.cost) ? 0 : max) : format(max)}</span><span>{generations.length} generations</span></div>
@@ -238,7 +235,7 @@ function SessionDashboard({ session }: { session: SessionView }) {
     <Metrics stats={session.stats} />
     {session.warnings.length > 0 && <details className="notice"><summary>{session.warnings.length} data {session.warnings.length === 1 ? 'notice' : 'notices'}</summary>{session.warnings.map((warning, index) => <p key={index}>{warning}</p>)}</details>}
     <Analytics session={session} onSelect={selectItem} />
-    <section className="chapter timeline-layout" aria-label="Observation timeline"><aside className="timeline-aside"><span className="eyebrow">Follow the conversation</span><h2>The session,<br />unfolded.</h2><p>Every prompt, decision<br />and tool result. In order.</p><div className="timeline-count"><strong>{format(session.items.length)}</strong><span>timeline observations</span></div><button className="button primary" disabled={!latest} onClick={() => latest && selectItem(latest)}>Jump to latest <Icon name="arrow" /></button><p className="note">Newest to oldest · local time<br />Tool results live with their generation.</p></aside>
+    <section className="chapter timeline-layout" aria-label="Observation timeline"><aside className="timeline-aside"><span className="eyebrow">Observations</span><h2>Session timeline</h2><p>User messages, generations and tool results.</p><div className="timeline-count"><strong>{format(session.items.length)}</strong><span>timeline observations</span></div><button className="button primary" disabled={!latest} onClick={() => latest && selectItem(latest)}>Jump to latest <Icon name="arrow" /></button><p className="note">Newest to oldest · local time<br />Tool results live with their generation.</p></aside>
       <div className="timeline-main"><div className="timeline-toolbar"><div className="tabs" role="group" aria-label="Filter observations">{[['all', 'All'], ['generation', 'Generations'], ['user', 'User'], ['tool', 'Other tools']].map(([value, label]) => <button key={value} aria-pressed={filter === value} className={filter === value ? 'active' : ''} onClick={() => setFilter(value)}>{label}</button>)}</div><div className="expand-controls"><button onClick={() => setExpanded(new Set(items.map(item => item.id)))}>Expand all</button><span>/</span><button onClick={() => setExpanded(new Set())}>Collapse all</button></div></div>
         <label className="search timeline-search"><Icon name="search" size={16} /><input placeholder="Find a message, model or tool…" aria-label="Search observations" value={query} onChange={event => setQuery(event.target.value)} /><span>{items.length} shown</span></label>
         <div className="observations">{items.map(item => <ObservationCard key={item.id} item={item} filename={session.filename} open={expanded.has(item.id)} onToggle={() => setExpanded(previous => { const next = new Set(previous); next.has(item.id) ? next.delete(item.id) : next.add(item.id); return next; })} />)}</div>
@@ -268,15 +265,15 @@ function Library({ sessions }: { sessions: LibraryEntry[] }) {
   }, [sessions]);
   const filtered = sessions.filter(session => `${session.filename} ${session.preview} ${session.stats.models.join(' ')}`.toLowerCase().includes(query.toLowerCase())).sort((a, b) => sort === 'cost' ? (b.stats.cost ?? -1) - (a.stats.cost ?? -1) : sort === 'tokens' ? (b.stats.usage.total ?? -1) - (a.stats.usage.total ?? -1) : b.modified.localeCompare(a.modified));
   return <>
-    <header className="hero library-hero"><div><span className="eyebrow">Local intelligence, in focus</span><h1 className="max-w-6xl">A little clarity.<br />Every <Signal /> conversation.</h1><p>Your sessions, tokens and tool calls.<br />One place to see how the work happened.</p></div><div className="hero-art" aria-hidden="true"><div className="orbit orbit-one" /><div className="orbit orbit-two" /><div className="orbit orbit-three" /><div className="orbit-core"><Signal /></div><span className="art-caption">FROM PROMPT TO PERSPECTIVE</span></div></header>
+    <header className="hero library-hero"><div><span className="eyebrow">OpenCode Langfuse Observability Local</span><h1 className="max-w-6xl">OLOL dashboard</h1><p>Local sessions, token usage, costs and tool calls.</p></div><div className="hero-art" aria-hidden="true"><div className="orbit orbit-one" /><div className="orbit orbit-two" /><div className="orbit orbit-three" /><div className="orbit-core"><Signal /></div><span className="art-caption">SESSION OBSERVATIONS</span></div></header>
     <Metrics stats={stats} library={sessions.length} />
-    {stats.models.length > 0 && <div className="model-strip"><span>In your workspace</span><div className="marquee"><div>{[0, 1].map(copy => <span className="marquee-set" aria-hidden={copy === 1 ? true : undefined} key={copy}>{stats.models.map(model => <span key={model}><span className="dot" />{model}</span>)}</span>)}</div></div></div>}
-    <section className="chapter session-library"><div className="section-heading"><div><span className="eyebrow">Pick up the thread</span><h2>Your session library<span className="heading-count">{sessions.length}</span></h2></div><span className="subtle">JSONL files · stored locally</span></div>
+    {stats.models.length > 0 && <div className="model-strip"><span>Recorded models</span><div className="marquee"><div>{[0, 1].map(copy => <span className="marquee-set" aria-hidden={copy === 1 ? true : undefined} key={copy}>{stats.models.map(model => <span key={model}><span className="dot" />{model}</span>)}</span>)}</div></div></div>}
+    <section className="chapter session-library"><div className="section-heading"><div><span className="eyebrow">Recorded sessions</span><h2>Session library<span className="heading-count">{sessions.length}</span></h2></div><span className="subtle">JSONL files · stored locally</span></div>
       <div className="library-toolbar"><label className="search"><Icon name="search" /><input aria-label="Search sessions" placeholder="Search sessions, prompts or models…" value={query} onChange={event => setQuery(event.target.value)} /><kbd>/</kbd></label><select aria-label="Sort sessions" value={sort} onChange={event => setSort(event.target.value)}><option value="recent">Recently updated</option><option value="tokens">Most tokens</option><option value="cost">Highest cost</option></select></div>
       <div className="library-table-head"><span>Conversation</span><span>Generations</span><span>Tokens</span><span>Cost</span><span /></div>
       <div className="session-list">{filtered.map(session => <a className="session-link" href={`/dashboard?session=${encodeURIComponent(session.filename)}`} key={session.filename}><div className="session-description"><div className="session-meta"><Icon name="file" size={15} /><span>{date(session.modified)}</span><span className="model-name">{session.stats.models.join(' / ') || 'Awaiting generation'}</span></div><h3>{session.preview}</h3><div className="file-name">{session.filename}</div>{session.warnings.length > 0 && <span className="file-warning">{session.warnings.length} data notices</span>}</div><div className="session-number"><strong>{format(session.stats.generations)}</strong><small>{format(session.stats.toolCalls)} tools</small></div><div className="session-number"><strong>{compact(session.stats.usage.total)}</strong><small>{percent(session.stats.cacheHit)} cache hit</small></div><div className="session-number"><strong>{money(session.stats.cost)}</strong><small>estimated {money(session.stats.estimatedCost?.total ?? null)}</small></div><span className="session-arrow"><Icon name="arrow" /></span></a>)}</div>
-      {!filtered.length && <div className="empty"><Icon name="file" size={32} /><h3>{sessions.length ? 'No matching sessions' : 'Your next conversation starts here.'}</h3><p>{sessions.length ? 'Try a different filename, prompt or model.' : 'Send observations to the receiver, then refresh to explore your sessions.'}</p>{query && <button className="button" onClick={() => setQuery('')}>Clear search</button>}</div>}
-      <div className="library-bottom"><span>{filtered.length} of {sessions.length} sessions</span><span>Made for a closer look.</span></div>
+      {!filtered.length && <div className="empty"><Icon name="file" size={32} /><h3>{sessions.length ? 'No matching sessions' : 'No sessions recorded'}</h3><p>{sessions.length ? 'Try a different filename, prompt or model.' : 'Send observations to the receiver, then refresh to view your sessions.'}</p>{query && <button className="button" onClick={() => setQuery('')}>Clear search</button>}</div>}
+      <div className="library-bottom"><span>{filtered.length} of {sessions.length} sessions</span><span>Stored locally as JSONL</span></div>
     </section>
   </>;
 }
@@ -326,7 +323,7 @@ function App() {
     return () => clearTimeout(timeout);
   }, [auto, loading, updated]);
   useEffect(() => {
-    document.title = filename ? `${session?.preview ?? filename} · Observatory` : 'Session library · Observatory';
+    document.title = filename ? `${session?.preview ?? filename} · OLOL` : 'Session library · OLOL';
     const shortcut = (event: KeyboardEvent) => {
       if (event.key === '/' && !['INPUT', 'TEXTAREA', 'SELECT'].includes((event.target as HTMLElement).tagName)) { event.preventDefault(); document.querySelector<HTMLInputElement>('.search input')?.focus(); }
     };
@@ -344,13 +341,13 @@ function App() {
   }, { scope, dependencies: [Boolean(session || sessions)] });
   return <main className="overflow-x-hidden w-full max-w-full" ref={scope}>
     <a className="skip-link" href="#content">Skip to content</a>
-    <nav className="nav"><a className="brand" href="/dashboard"><span className="brand-mark"><i /><i /><i /></span>observatory<span className="brand-divider">/</span><span className="brand-sub">sessions</span></a><div className="nav-right"><span className="local-status"><span className="dot" />Local workspace</span><a className="nav-link" href="/dashboard">Library<Icon name="arrow" size={14} /></a></div></nav>
+    <nav className="nav"><a className="brand" href="/dashboard" title="OpenCode Langfuse Observability Local"><span className="brand-mark" aria-hidden="true"><i /><i /><i /></span>OLOL<span className="brand-divider">/</span><span className="brand-sub">sessions</span></a><div className="nav-right"><span className="local-status"><span className="dot" />Local workspace</span><a className="nav-link" href="/dashboard">Library<Icon name="arrow" size={14} /></a></div></nav>
     <div className="workspace"><div className="workspace-toolbar" ref={toolbar}><span><span className="breadcrumb">Workspace</span><span className="slash">/</span>{filename ? 'Session detail' : 'Session library'}</span><div><label className="auto-refresh"><input type="checkbox" checked={auto} onChange={event => setAuto(event.target.checked)} />Auto-refresh</label><button className={`refresh-button ${loading ? 'loading' : ''}`} disabled={loading} onClick={() => setRefresh(value => value + 1)}><Icon name="refresh" size={15} />{loading ? 'Loading' : 'Refresh'}</button></div></div>
       <div id="content">{error && <div className="error" role="alert"><h2>Couldn’t load the {filename ? 'session' : 'library'}.</h2><p>{error}</p><button className="button" onClick={() => setRefresh(value => value + 1)}>Try again</button>{filename && <a className="button" href="/dashboard">Back to library</a>}</div>}
-        {!session && !sessions && loading && <div className="loading-state" role="status"><Signal /><h2>Bringing the details into focus.</h2><p>Reading your local session files…</p></div>}
+        {!session && !sessions && loading && <div className="loading-state" role="status"><Signal /><h2>Loading sessions</h2><p>Reading local session files…</p></div>}
          {session && <SessionDashboard key={session.filename} session={session} />}{sessions && !filename && <Library sessions={sessions} />}
       </div>
-      <footer ref={footer}><a className="brand footer-brand" href="/dashboard">observatory<span className="dot" /></a><span>{updated ? `Last read ${updated.toLocaleTimeString()}` : 'Local session intelligence'} · All times local</span></footer>
+      <footer ref={footer}><a className="brand footer-brand" href="/dashboard" title="OpenCode Langfuse Observability Local">OLOL<span className="dot" /></a><span>{updated ? `Last read ${updated.toLocaleTimeString()}` : 'Local session data'} · All times local</span></footer>
     </div>
     {filename && session && <nav className={`floating-actions${showFloatingActions ? ' is-visible' : ''}`} aria-label="Session shortcuts" aria-hidden={!showFloatingActions} inert={!showFloatingActions}>
       <label className="auto-refresh"><input type="checkbox" checked={auto} onChange={event => setAuto(event.target.checked)} />Auto-refresh</label>

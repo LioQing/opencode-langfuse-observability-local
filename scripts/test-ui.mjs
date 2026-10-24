@@ -25,12 +25,41 @@ try {
   const address = await app.listen({ host: '127.0.0.1', port: 0 });
   browser = await chromium.launch({ channel: process.env.BROWSER_CHANNEL || (process.platform === 'win32' ? 'msedge' : undefined) });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
+  await page.emulateMedia({ colorScheme: 'dark' });
+  const screenshot = async name => {
+    if (process.env.UI_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.UI_SCREENSHOT_DIR, `olol-${name}.png`), fullPage: true });
+  };
+  const assertTheme = async theme => {
+    await page.emulateMedia({ colorScheme: theme });
+    const dark = theme === 'dark';
+    await expect(page.locator('body')).toHaveCSS('color', dark ? 'rgb(244, 244, 245)' : 'rgb(9, 9, 11)');
+    await expect(page.locator('main').first()).toHaveCSS('background-color', dark ? 'rgb(0, 0, 0)' : 'rgb(255, 255, 255)');
+    await expect(page.locator('.metrics')).toHaveCSS('border-top-color', dark ? 'rgb(39, 39, 42)' : 'rgb(228, 228, 231)');
+    await expect(page.locator('.metrics')).toHaveCSS('border-radius', '0px');
+    await expect(page.locator('.search').first()).toHaveCSS('border-color', dark ? 'rgb(63, 63, 70)' : 'rgb(212, 212, 216)');
+  };
   const errors = [];
   const historyRequests = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('request', request => { if (request.url().includes('&item=')) historyRequests.push(request.url()); });
   await page.goto(`${address}/dashboard`);
   await expect(page.locator('.session-link')).toHaveCount(1);
+  await expect(page).toHaveTitle('Session library · OLOL');
+  await expect(page.locator('.nav .brand')).toContainText('OLOL');
+  await expect(page.locator('.nav .brand')).toHaveAttribute('title', 'OpenCode Langfuse Observability Local');
+  await expect(page.locator('h1')).toHaveText('OLOL dashboard');
+  await expect(page.locator('.library-hero .eyebrow')).toHaveText('OpenCode Langfuse Observability Local');
+  await assertTheme('dark');
+  await screenshot('library-dark-desktop');
+  await assertTheme('light');
+  await screenshot('library-light-desktop');
+  await page.setViewportSize({ width: 390, height: 844 });
+  for (const theme of ['light', 'dark']) {
+    await assertTheme(theme);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await screenshot(`library-${theme}-mobile`);
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await page.getByRole('textbox', { name: 'Search sessions' }).fill('absent');
   await expect(page.getByText('No matching sessions')).toBeVisible();
   await page.getByRole('button', { name: 'Clear search' }).click();
@@ -51,7 +80,25 @@ try {
   await page.locator('.session-link').click();
   await expect(page.locator('h1')).toHaveText('Search for a test result');
   await expect(page.locator('.session-filename')).toHaveText(filename);
-  await expect(page).toHaveTitle('Search for a test result · Observatory');
+  await expect(page).toHaveTitle('Search for a test result · OLOL');
+  await expect(page.getByRole('heading', { name: 'Session analytics', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Session timeline', exact: true })).toBeVisible();
+  for (const theme of ['light', 'dark']) {
+    await assertTheme(theme);
+    await expect(page.locator('.chart-column-bar>span').first()).toHaveCSS('background-color', 'rgb(37, 99, 235)');
+    await expect(page.locator('.chart-column-bar>span').first()).toHaveCSS('background-image', 'none');
+    await expect(page.locator('.button.primary')).toHaveCSS('background-color', theme === 'dark' ? 'rgb(244, 244, 245)' : 'rgb(24, 24, 27)');
+    const iconColors = { generation: theme === 'dark' ? 'rgb(192, 132, 252)' : 'rgb(126, 34, 206)', user: theme === 'dark' ? 'rgb(96, 165, 250)' : 'rgb(37, 99, 235)', tool: theme === 'dark' ? 'rgb(251, 191, 36)' : 'rgb(180, 83, 9)', response: theme === 'dark' ? 'rgb(45, 212, 191)' : 'rgb(15, 118, 110)' };
+    for (const [type, color] of Object.entries(iconColors)) {
+      for (const icon of await page.locator(`.type-icon.${type}`).all()) await expect(icon).toHaveCSS('color', color);
+    }
+    const categoryColors = await page.locator('.mix-panel .usage-row i').evaluateAll(nodes => nodes.map(node => getComputedStyle(node).backgroundColor));
+    assert.equal(new Set(categoryColors).size, 5);
+    for (const name of ['Token composition by category', 'Estimated cost composition by category']) {
+      assert.deepEqual(await page.locator('.mix-panel').getByRole('group', { name, exact: true }).locator('.usage-segment').evaluateAll(nodes => nodes.map(node => getComputedStyle(node).backgroundColor)), categoryColors);
+    }
+    await screenshot(`session-${theme}-desktop`);
+  }
   const durationMetric = page.locator('.session-metrics .metric').filter({ hasText: 'Total duration' });
   await expect(durationMetric.locator('strong')).toHaveText('55s');
   await expect(durationMetric.locator('.metric-bottom')).toContainText('Generation time 5s · 9.0%');
@@ -237,6 +284,10 @@ try {
   }
   await page.setViewportSize({ width: 320, height: 720 });
   await assertGenerationFits();
+  for (const theme of ['light', 'dark']) {
+    await assertTheme(theme);
+    await screenshot(`session-${theme}-mobile`);
+  }
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   assert.equal(await argumentsView.evaluate(node => getComputedStyle(node).display), 'block');
   assert.equal(await toolText.locator('.json-view').first().evaluate(node => node.scrollWidth <= node.clientWidth), true);
@@ -317,7 +368,7 @@ try {
   await expect(page.locator('#observation-1 .json-key')).toHaveText(['"role": ', '"content": ', '"enabled": ']);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   assert.deepEqual(errors, []);
-  console.log('Browser checks passed: library search, navigation, newest-first timeline, expansion, tool matching, formatted JSON and mixed text, exact raw arguments, decoded strings, lazy JSON expansion, lazy history, chart navigation, filtering, refresh, Markdown safety, mobile layout, and error recovery.');
+  console.log('Browser checks passed: OLOL branding, neutral light/dark themes, library search, navigation, newest-first timeline, expansion, tool matching, formatted JSON and mixed text, exact raw arguments, decoded strings, lazy JSON expansion, lazy history, chart navigation, filtering, refresh, Markdown safety, mobile layout, and error recovery.');
 } finally {
   await browser?.close();
   await app.close();

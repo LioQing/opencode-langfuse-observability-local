@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:net';
+import { createServer as createHttpServer } from 'node:http';
 import { mkdtemp, readFile, readdir, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -46,7 +47,7 @@ test('V2 plugin starts one receiver, shares it, and stops only its own child', a
     ]);
     await assert.rejects(plugin.setup({ options: { port: ignoredPort } }), /already configured/);
     await assert.rejects(plugin.setup({ options: { port, retentionDays: 5 } }), /already configured with retentionDays/);
-    assert.match(await (await fetch(url)).text(), /Session observatory/);
+    assert.match(await (await fetch(url)).text(), /<title>OLOL · OpenCode Langfuse Observability Local<\/title>/);
     assert.deepEqual(await readdir(directory), [kept]);
     await assert.rejects(fetch(`http://127.0.0.1:${ignoredPort}/dashboard`));
     await first();
@@ -97,6 +98,22 @@ test('V2 plugin leaves an already-running receiver alone', async () => {
 test('V2 plugin rejects invalid port options', async () => {
   for (const port of [0, -1, 65536, '3000', 2.5, null]) {
     await assert.rejects(plugin.setup({ options: { port } }), /port must be an integer/);
+  }
+});
+
+test('V2 plugin still recognizes receivers with the legacy dashboard title', async () => {
+  const app = createHttpServer((_, response) => {
+    response.writeHead(200, { 'Content-Type': 'text/html' });
+    response.end('<!doctype html><title>Session observatory</title>');
+  });
+  await new Promise(resolve => app.listen(0, '127.0.0.1', resolve));
+  const port = app.address().port;
+  try {
+    const cleanup = await plugin.setup({ options: { port } });
+    await cleanup();
+    assert.equal((await fetch(`http://127.0.0.1:${port}/dashboard`)).status, 200);
+  } finally {
+    await new Promise((resolve, reject) => app.close(error => error ? reject(error) : resolve()));
   }
 });
 

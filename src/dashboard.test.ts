@@ -190,6 +190,9 @@ test('serves dashboard, local assets, session list and lazy history without coll
   assert.equal(html.statusCode, 200);
   assert.match(html.headers['content-type']!, /text\/html/);
   assert.match(html.body, /dashboard\/assets\/dashboard.js/);
+  assert.match(html.body, /<title>OLOL · OpenCode Langfuse Observability Local<\/title>/);
+  assert.match(html.body, /name="color-scheme" content="dark light"/);
+  assert.match(html.body, /name="application-name" content="opencode-langfuse-observability-local"/);
   assert.equal((await app.inject('/dashboard/assets/dashboard.js')).statusCode, 200);
   assert.equal((await app.inject('/dashboard/assets/dashboard.css')).statusCode, 200);
   const list = (await app.inject('/dashboard/api/sessions')).json();

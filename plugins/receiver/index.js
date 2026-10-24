@@ -44,7 +44,10 @@ function endpoint(port) {
 async function receiverIsRunning(url) {
   try {
     const response = await fetch(url, { signal: AbortSignal.timeout(500) });
-    return response.ok && (await response.text()).includes('<title>Session observatory</title>');
+    if (!response.ok) return false;
+    const html = await response.text();
+    return html.includes('<meta name="application-name" content="opencode-langfuse-observability-local">') ||
+      html.includes('<title>Session observatory</title>'); // Receivers built before the OLOL rebrand.
   } catch {
     return false;
   }
