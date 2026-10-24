@@ -293,7 +293,6 @@ function App() {
   const [updated, setUpdated] = useState<Date | null>(null);
   const scope = useRef<HTMLElement>(null);
   const toolbar = useRef<HTMLDivElement>(null);
-  const footer = useRef<HTMLElement>(null);
   useEffect(() => {
     try { localStorage.setItem('observatory.autoRefresh', String(auto)); }
     catch { /* Storage may be unavailable in private browsing. */ }
@@ -301,8 +300,7 @@ function App() {
   useEffect(() => {
     if (!filename) return;
     const update = () => setShowFloatingActions(
-      (toolbar.current?.getBoundingClientRect().bottom ?? 0) < 0 &&
-      (footer.current?.getBoundingClientRect().top ?? Infinity) > window.innerHeight
+      (toolbar.current?.getBoundingClientRect().bottom ?? 0) < 0
     );
     update();
     window.addEventListener('scroll', update, { passive: true });
@@ -347,7 +345,7 @@ function App() {
         {!session && !sessions && loading && <div className="loading-state" role="status"><Signal /><h2>Loading sessions</h2><p>Reading local session files…</p></div>}
          {session && <SessionDashboard key={session.filename} session={session} />}{sessions && !filename && <Library sessions={sessions} />}
       </div>
-      <footer ref={footer}><a className="brand footer-brand" href="/dashboard" title="OpenCode Langfuse Observability Local">OLOL<span className="dot" /></a><span>{updated ? `Last read ${updated.toLocaleTimeString()}` : 'Local session data'} · All times local</span></footer>
+      <footer><a className="brand footer-brand" href="/dashboard" title="OpenCode Langfuse Observability Local">OLOL<span className="dot" /></a><span>{updated ? `Last read ${updated.toLocaleTimeString()}` : 'Local session data'} · All times local</span></footer>
     </div>
     {filename && session && <nav className={`floating-actions${showFloatingActions ? ' is-visible' : ''}`} aria-label="Session shortcuts" aria-hidden={!showFloatingActions} inert={!showFloatingActions}>
       <label className="auto-refresh"><input type="checkbox" checked={auto} onChange={event => setAuto(event.target.checked)} />Auto-refresh</label>

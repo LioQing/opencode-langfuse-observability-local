@@ -307,6 +307,18 @@ try {
   await page.evaluate(() => window.scrollTo(0, 800));
   const shortcuts = page.getByRole('navigation', { name: 'Session shortcuts' });
   await expect(shortcuts).toBeVisible();
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    await page.evaluate(() => window.scrollTo(0, 800));
+    await expect(shortcuts).toBeVisible();
+    const position = await shortcuts.evaluate(node => {
+      const rect = node.getBoundingClientRect();
+      return { top: rect.top, right: innerWidth - rect.right };
+    });
+    const inset = viewport.width <= 600 ? 12 : 20;
+    assert.equal(position.top, inset);
+    assert.equal(position.right, inset);
+  }
   await expect(shortcuts.getByRole('link', { name: 'All sessions' })).toHaveAttribute('href', '/dashboard');
   await shortcuts.getByRole('checkbox', { name: 'Auto-refresh' }).check();
   await expect(page.locator('.workspace-toolbar').getByRole('checkbox', { name: 'Auto-refresh' })).toBeChecked();
@@ -342,8 +354,6 @@ try {
   await expect(composition.locator('.usage-bar-note')).toHaveCount(0);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-  await expect(page.locator('.floating-actions')).toBeHidden();
-  await page.evaluate(() => window.scrollTo(0, 800));
   await expect(shortcuts).toBeVisible();
   await shortcuts.getByRole('button', { name: 'Back to top' }).click();
   await expect(page.locator('.floating-actions')).toBeHidden();
