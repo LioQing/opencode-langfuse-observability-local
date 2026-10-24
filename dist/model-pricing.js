@@ -46,9 +46,11 @@ export function estimateGeneration(catalog, provider, model, usage) {
     return { input, output, reasoning, cache_read, cache_write, total: input + output + cache_read + cache_write };
 }
 export function sumEstimates(estimates) {
-    if (!estimates.length || estimates.some(value => value === null))
+    const available = estimates.filter(value => value !== null);
+    if (!available.length)
         return null;
-    return estimates.reduce((total, value) => ({
+    // Missing estimates contribute zero without turning unknown generation costs into recorded zeros.
+    return available.reduce((total, value) => ({
         input: total.input + value.input, output: total.output + value.output, reasoning: total.reasoning + value.reasoning,
         cache_read: total.cache_read + value.cache_read, cache_write: total.cache_write + value.cache_write,
         total: total.total + value.total,

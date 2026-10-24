@@ -107,7 +107,7 @@ export function parseSession(content: string, filename: string, catalog: ModelPr
     const response = Boolean(textContent(output));
     const summary = type === 'user' ? textContent(input) || 'User observation'
       : type === 'tool' ? `Tool · ${metadata.tool ?? 'unknown'}`
-        : [reasoning ? 'Reasoning' : '', ...calls.map(call => `tool(${call.name ?? 'unknown'})`), response ? 'Response' : ''].filter(Boolean).join(' + ') || 'Generation';
+        : [reasoning ? 'Reasoning' : '', ...calls.map(call => `Tool · ${call.name ?? 'unknown'}`), response ? 'Response' : ''].filter(Boolean).join(' + ') || 'Generation';
     return { id, type, timestamp: timestamp?.toString() ?? null, date: timestamp === null ? null : new Date(Number(timestamp / 1000000n)).toISOString(), duration,
       provider: metadata.providerID ?? null, model: entry[prefix + 'model.name'] ?? null, variant: metadata.variant ?? null, mode: metadata.mode ?? metadata.agent ?? null,
       counts: { total: messages.length, assistant: messages.filter(message => message?.role === 'assistant').length, user: messages.filter(message => message?.role === 'user').length, tool: messages.filter(message => message?.role === 'tool').length, toolCalls: calls.length },
@@ -136,7 +136,7 @@ export function parseSession(content: string, filename: string, catalog: ModelPr
     const callID = metadata.callID ?? metadata.toolCallId ?? metadata.tool_call_id;
     generation.tools.push({ id: typeof callID === 'string' ? callID : null, name, arguments: null, inferred: true,
       results: [{ id: row.id, input: row.entry[prefix + 'input'], output: row.entry[prefix + 'output'], start: row.entry.startTimeUnixNano, end: row.entry.endTimeUnixNano }] });
-    generation.summary = `${generation.summary === 'Generation' ? '' : generation.summary + ' + '}tool(${name})`;
+    generation.summary = `${generation.summary === 'Generation' ? '' : generation.summary + ' + '}Tool · ${name}`;
     attached.add(row.id);
   }
   const visibleItems = items.filter(item => item.type !== 'tool' || !attached.has(item.id));

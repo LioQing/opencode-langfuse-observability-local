@@ -64,10 +64,12 @@ export function estimateGeneration(
 }
 
 export function sumEstimates(estimates: (CostEstimate | null)[]): CostEstimate | null {
-  if (!estimates.length || estimates.some(value => value === null)) return null;
-  return estimates.reduce<CostEstimate>((total, value) => ({
-    input: total.input + value!.input, output: total.output + value!.output, reasoning: total.reasoning + value!.reasoning,
-    cache_read: total.cache_read + value!.cache_read, cache_write: total.cache_write + value!.cache_write,
-    total: total.total + value!.total,
+  const available = estimates.filter(value => value !== null);
+  if (!available.length) return null;
+  // Missing estimates contribute zero without turning unknown generation costs into recorded zeros.
+  return available.reduce<CostEstimate>((total, value) => ({
+    input: total.input + value.input, output: total.output + value.output, reasoning: total.reasoning + value.reasoning,
+    cache_read: total.cache_read + value.cache_read, cache_write: total.cache_write + value.cache_write,
+    total: total.total + value.total,
   }), { input: 0, output: 0, reasoning: 0, cache_read: 0, cache_write: 0, total: 0 });
 }

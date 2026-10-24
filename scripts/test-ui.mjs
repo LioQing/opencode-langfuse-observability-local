@@ -178,6 +178,7 @@ try {
   await expect(page.locator('#observation-4 .type-icons .type-icon.response')).toHaveCount(1);
   await expect(page.locator('#observation-4 .type-icons .type-icon.generation')).toHaveCount(0);
   assert.deepEqual(await page.locator('#observation-3 .type-icons .type-icon').evaluateAll(nodes => nodes.map(node => [...node.classList].at(-1))), ['generation', 'tool']);
+  await expect(page.locator('#observation-3 .summary-text')).toHaveText('Reasoning + Tool · websearch');
   await expect(page.locator('.is-open')).toHaveCount(1);
   await expect(page.locator('.is-open')).toHaveAttribute('id', 'observation-4');
   assert.equal(await page.locator('.observation').first().getAttribute('id'), await page.locator('.is-open').getAttribute('id'));
@@ -309,6 +310,17 @@ try {
   await expect(shortcuts.getByRole('link', { name: 'All sessions' })).toHaveAttribute('href', '/dashboard');
   await shortcuts.getByRole('checkbox', { name: 'Auto-refresh' }).check();
   await expect(page.locator('.workspace-toolbar').getByRole('checkbox', { name: 'Auto-refresh' })).toBeChecked();
+  await writeFile(join(directory, filename), serialize([...records,
+    { [p + 'type']: 'generation' },
+    { [p + 'type']: 'generation', [p + 'model.name']: 'unknown-model', [p + 'usage_details']: records[2][p + 'usage_details'] },
+  ]));
+  await page.getByRole('button', { name: 'Refresh', exact: true }).first().click();
+  await expect(page.locator('.observation')).toHaveCount(6);
+  await expect(page.locator('.session-metrics .cost-estimate span').first()).toHaveText('Estimated $0.00047');
+  await expect(composition.locator('.usage-row.total-row')).toContainText('$0.00047');
+  await expect(composition.getByRole('group', { name: 'Estimated cost composition by category' }).locator('.usage-segment')).toHaveCount(5);
+  await expect(composition.locator('.usage-bar-note')).toHaveCount(0);
+  await writeFile(join(directory, filename), serialize(records));
   const model = pricing.catalog['test-provider'].models['test-model'];
   delete model.cost;
   await page.reload();

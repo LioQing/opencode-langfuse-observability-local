@@ -134,7 +134,7 @@ In this plugin's format, `input` is uncached input, and the reported `total` exc
 
 At startup, the receiver fetches provider and model prices from <https://models.dev/api.json>. It sends no prompts or session data. Session and library cost cards show an estimated total, with input, output, cached-input, and cached-output costs, when it differs from the displayed recorded cost. Reasoning cost is included in output cost.
 
-Estimates require complete generation usage and matching provider/model prices. Otherwise, the recorded-cost line stays unchanged. If the price catalog cannot be fetched within 10 seconds, the receiver runs without estimates.
+Individual estimates require complete generation usage and matching provider/model prices. Session and library aggregates treat unavailable estimates as zero contributions so the available costs and cost composition remain visible. Individual missing values still appear as a dash, and a session with no available estimates remains unpriced. Recorded costs are unchanged. If the price catalog cannot be fetched within 10 seconds, the receiver runs without estimates.
 
 The React UI, GSAP animations, and Geist fonts are bundled and served by the Fastify application. There are no runtime CDN dependencies, and the UI respects reduced-motion preferences.
 

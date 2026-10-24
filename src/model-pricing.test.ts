@@ -42,7 +42,9 @@ test('estimates per-category cost from exact provider/model pricing, with reason
   assert.equal(estimateGeneration(catalog, 'provider', 'other', usage), null);
   assert.equal(estimateGeneration(catalog, 'provider', 'model', { ...usage, reasoning: null }), null);
   assert.equal(estimateGeneration({ provider: { models: { model: { cost: { input: 1, output: 2 } } } } }, 'provider', 'model', usage), null);
-  assert.equal(sumEstimates([estimate, null]), null);
+  assert.deepEqual(sumEstimates([estimate, null]), estimate);
+  assert.deepEqual(sumEstimates([null, estimate, null, estimate]), doubled);
+  assert.equal(sumEstimates([null, null]), null);
   assert.equal(sumEstimates([]), null);
 });
 
@@ -55,6 +57,8 @@ test('uses context tiers and recognizes free models and zero-valued usage', () =
   assert.deepEqual(estimateGeneration({ provider: { models: { free: { cost: { input: 0, output: 0 } } } } }, 'provider', 'free', {
     input: 1, output: 2, reasoning: 0, cache_read: 0, cache_write: 0,
   }), { input: 0, output: 0, reasoning: 0, cache_read: 0, cache_write: 0, total: 0 });
+  const zero = estimateGeneration(catalog, 'provider', 'model', { input: 0, output: 0, reasoning: 0, cache_read: 0, cache_write: 0 });
+  assert.deepEqual(sumEstimates([null, zero]), zero);
 });
 
 test('shows the selected per-million model rates independently of cost estimates', () => {

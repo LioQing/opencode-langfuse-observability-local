@@ -121,13 +121,13 @@ test('infers orphan tool results only inside one complete generation interval an
     { [p + 'type']: 'generation', startTimeUnixNano: '200', endTimeUnixNano: '250' },
   ), 'inferred.jsonl');
   assert.deepEqual(session.items.map(item => item.id), [4, 2]);
-  assert.equal(session.items[1].summary, 'Reasoning + tool(grep)');
+  assert.equal(session.items[1].summary, 'Reasoning + Tool · grep');
   assert.equal(session.items[1].reasoning, true);
   assert.equal(session.items[1].response, false);
   assert.deepEqual(session.items[1].tools[0].results.map(result => result.id), [1]);
   assert.equal(session.items[1].tools[0].inferred, true);
   assert.deepEqual(session.items[1].tools[0].results[0].input, { pattern: 'test' });
-  assert.equal(session.items[0].summary, 'tool(read)');
+  assert.equal(session.items[0].summary, 'Tool · read');
   assert.equal(session.stats.toolCalls, 2);
   assert.equal(session.items[1].counts.toolCalls, 0);
 });
@@ -147,6 +147,17 @@ test('leaves ambiguous, incomplete and out-of-interval tools standalone; exact c
   assert.equal(session.items.find(item => item.id === 1)!.tools[0].inferred, false);
   assert.equal(session.items.find(item => item.id === 1)!.tools[0].results[0].id, 3);
   assert.equal(session.stats.toolCalls, 5);
+});
+
+test('uses the same tool labels for standalone, tool-only and mixed generations', () => {
+  const session = parseSession(lines(
+    { [p + 'type']: 'tool', [p + 'metadata']: { tool: 'question' } },
+    { [p + 'type']: 'generation', [p + 'output']: [{ tool_calls: [{ name: 'question' }] }] },
+    { [p + 'type']: 'generation', [p + 'output']: [{ thinking: 'Plan', content: 'Answer', tool_calls: [{ name: 'question' }, {}] }] },
+  ), 'tool-labels.jsonl');
+  assert.deepEqual(session.items.map(item => item.summary), [
+    'Tool · question', 'Tool · question', 'Reasoning + Tool · question + Tool · unknown + Response',
+  ]);
 });
 
 test('counts tool observations without generation output, without double-counting linked output calls', () => {
@@ -267,10 +278,29 @@ test('estimates complete session and library costs using the current startup pri
       [p + 'usage_details']: { input: 1, output: 1, reasoning: 0, cache_read: 0, cache_write: 0 } },
     { [p + 'type']: 'generation', [p + 'usage_details']: { input: 1, output: 1, cache_read: 0, cache_write: 0 } },
   ), 'incomplete.jsonl', pricing.catalog);
-  assert.equal(incomplete.stats.estimatedCost, null);
+  assert.deepEqual(incomplete.stats.estimatedCost, incomplete.items[0].estimatedCost);
   assert.notEqual(incomplete.items[0].estimatedCost, null);
   assert.equal(incomplete.items[1].estimatedCost, null);
   assert.deepEqual(incomplete.items[1].modelPrice, { input: 1, output: 2, cache_read: 0.1, cache_write: 0.5 });
+});
+
+test('aggregates priced generations despite missing usage or pricing, preserving individual unknowns', () => {
+  const usage = { input: 100, output: 20, reasoning: 10, cache_read: 900, cache_write: 10, total: 130 };
+  const session = parseSession(lines(
+    { [p + 'type']: 'generation', [p + 'model.name']: 'model', [p + 'metadata']: { providerID: 'provider' },
+      [p + 'usage_details']: usage, [p + 'cost_details']: { total: 0.123 } },
+    { [p + 'type']: 'generation' },
+    { [p + 'type']: 'generation', [p + 'model.name']: 'unpriced', [p + 'usage_details']: usage },
+  ), 'partial-pricing.jsonl', { provider: { models: { model: { cost: { input: 1, output: 2, cache_read: 0.1, cache_write: 0.5 } } } } });
+  assert.deepEqual(session.stats.estimatedCost, session.items[0].estimatedCost);
+  assert.equal(session.stats.cost, 0.123);
+  assert.equal(session.stats.missingCost, 2);
+  assert.equal(session.stats.missingUsage, 1);
+  assert.equal(session.items[1].cost, null);
+  assert.equal(session.items[1].estimatedCost, null);
+  assert.equal(session.items[1].usage.total, null);
+  assert.equal(session.items[2].modelPrice, null);
+  assert.equal(session.items[2].estimatedCost, null);
 });
 
 test('a new workspace with no data directory has an empty library', async t => {
